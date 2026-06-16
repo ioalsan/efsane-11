@@ -58,7 +58,7 @@ const placementConfig: Record<AdPlacement, {
   },
 };
 
-const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT?.trim();
+const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT?.trim() || 'ca-pub-7391885209764245';
 
 export default function AdSlot({
   placement,

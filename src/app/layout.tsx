@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import CookieConsent from "@/components/CookieConsent";
+import SiteFooter from "@/components/SiteFooter";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "EFSANE-11",
-  description: "Türk futbolunun efsanelerinden rüya 11 kur, turnuvada yarıştır ve paylaş.",
+  title: "Canlı11",
+  description: "Canlı11 ile futbol kadronu kur, turnuva simülasyonuna katıl ve sonuçları paylaş.",
 };
 
-const adsenseClient = process.env.NEXT_PUBLIC_ADSENSE_CLIENT?.trim();
-const adsenseEnabled = Boolean(adsenseClient && /^ca-pub-\d+$/.test(adsenseClient));
+const adsenseClient = "ca-pub-7391885209764245";
 
 export default function RootLayout({
   children,
@@ -16,13 +17,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="tr"
-      suppressHydrationWarning
-      className="h-full antialiased"
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
-      {adsenseEnabled && (
+    <html lang="tr" suppressHydrationWarning className="h-full antialiased">
+      <body className="min-h-full flex flex-col">
+        <div className="flex-1">{children}</div>
+        <SiteFooter />
+        <CookieConsent />
         <Script
           id="google-adsense"
           async
@@ -30,7 +29,7 @@ export default function RootLayout({
           crossOrigin="anonymous"
           src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
         />
-      )}
+      </body>
     </html>
   );
 }
