@@ -1,0 +1,322 @@
+@import "tailwindcss";
+
+:root {
+  --background: #1a1a1a;
+  --foreground: #ffffff;
+  --neo-border: #000000;
+  --neo-shadow: #000000;
+}
+
+[data-theme='light'] {
+  --background: #f0f0f0;
+  --foreground: #1a1a1a;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@theme {
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+@utility neo-box {
+  border: 2px solid black;
+  box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
+  background-color: var(--color-white);
+  &:is(.dark *) {
+    background-color: var(--color-zinc-900);
+  }
+}
+
+@utility neo-btn {
+  border: 2px solid black;
+  box-shadow: 2px 2px 0px 0px rgba(0,0,0,1);
+  transition-property: all;
+  transition-duration: 150ms;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.025em;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  
+  &:active {
+    box-shadow: 0px 0px 0px 0px rgba(0,0,0,1);
+    transform: translate(2px, 2px);
+  }
+}
+
+@utility neo-panel {
+  border: 1px solid var(--color-zinc-800);
+  background-color: rgba(24, 24, 27, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.game-button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transform: translateZ(0);
+  will-change: transform, filter;
+  transition:
+    transform 180ms cubic-bezier(.2,.85,.2,1),
+    box-shadow 180ms ease,
+    filter 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.game-button::after {
+  content: "";
+  position: absolute;
+  inset: -45% -85%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,0.55) 50%, transparent 65%);
+  opacity: 0;
+  transform: translateX(-60%) skewX(-18deg);
+}
+
+.game-button:hover:not(:disabled) {
+  transform: translate(-2px, -2px) scale(1.015) !important;
+  filter: brightness(1.08) saturate(1.12);
+}
+
+.game-button:hover:not(:disabled)::after {
+  animation: buttonShine 680ms ease-out both;
+}
+
+.game-button:active:not(:disabled) {
+  transform: translate(2px, 2px) scale(0.985) !important;
+  filter: brightness(0.98);
+}
+
+.game-button:focus-visible {
+  outline: 3px solid #facc15;
+  outline-offset: 3px;
+}
+
+.game-button:disabled {
+  transform: none !important;
+  filter: grayscale(0.35);
+}
+
+.game-button-major:hover:not(:disabled) {
+  transform: translate(-3px, -3px) scale(1.025) !important;
+}
+
+.game-button-selected:not(:disabled) {
+  box-shadow: 0 0 0 2px #facc15, 0 0 20px rgba(250,204,21,0.72), 4px 4px 0 #000;
+  filter: saturate(1.18);
+  animation: buttonSelectedPulse 1500ms ease-in-out infinite;
+}
+
+.game-button-selected:hover:not(:disabled) {
+  filter: brightness(1.1) saturate(1.25);
+}
+
+.player-card {
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(145deg, #27272a 0%, #18181b 65%, #09090b 100%);
+  color: #f8fafc;
+}
+
+.player-card::before {
+  content: "";
+  position: absolute;
+  inset: -70%;
+  z-index: 2;
+  background: linear-gradient(110deg, transparent 35%, rgba(255,255,255,0.55) 48%, transparent 62%);
+  opacity: 0;
+  transform: translateX(-70%) rotate(16deg);
+  pointer-events: none;
+}
+
+.player-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.38;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 14px 14px;
+  pointer-events: none;
+}
+
+.player-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.player-card-selected {
+  animation: cardSelectLift 700ms cubic-bezier(.18,.89,.32,1.28) both;
+}
+
+.player-card-selected::before,
+.player-card-pop::before,
+.player-card.is-captain::before {
+  animation: cardLightSweep 820ms ease-out both;
+}
+
+.player-card-pop {
+  animation: cardDropPop 520ms cubic-bezier(.18,.89,.32,1.28) both;
+}
+
+.player-card.is-captain {
+  box-shadow: 0 0 0 2px #facc15, 0 0 24px rgba(250,204,21,0.7), 3px 3px 0 #000;
+}
+
+.card-scan-line {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.22) 50%, transparent 100%);
+  opacity: 0;
+  transform: translateY(-120%);
+}
+
+.player-card-selected .card-scan-line,
+.player-card-pop .card-scan-line {
+  animation: cardScan 640ms ease-out both;
+}
+
+.card-rating-badge {
+  background: #facc15;
+  color: #000;
+}
+
+.captain-crown-pulse {
+  animation: crownPulse 1150ms ease-in-out infinite;
+}
+
+.captain-bonus-toast {
+  animation: captainToast 2200ms ease-out both;
+}
+
+@keyframes cardLightSweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-70%) rotate(16deg);
+  }
+  30% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(70%) rotate(16deg);
+  }
+}
+
+@keyframes buttonShine {
+  0% {
+    opacity: 0;
+    transform: translateX(-60%) skewX(-18deg);
+  }
+  28% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(60%) skewX(-18deg);
+  }
+}
+
+@keyframes buttonSelectedPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px #facc15, 0 0 16px rgba(250,204,21,0.55), 4px 4px 0 #000;
+  }
+  50% {
+    box-shadow: 0 0 0 3px #facc15, 0 0 30px rgba(250,204,21,0.9), 5px 5px 0 #000;
+  }
+}
+
+@keyframes cardScan {
+  0% {
+    opacity: 0;
+    transform: translateY(-120%);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(120%);
+  }
+}
+
+@keyframes cardSelectLift {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.04) translateY(-2px);
+  }
+  100% {
+    transform: scale(1.02) translateY(-1px);
+  }
+}
+
+@keyframes cardDropPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.72) rotate(-4deg);
+    filter: saturate(1.6) brightness(1.25);
+  }
+  58% {
+    opacity: 1;
+    transform: scale(1.14) rotate(1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    filter: saturate(1) brightness(1);
+  }
+}
+
+@keyframes crownPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(250,204,21,0));
+  }
+  50% {
+    transform: scale(1.18) rotate(-7deg);
+    filter: drop-shadow(0 0 10px rgba(250,204,21,0.9));
+  }
+}
+
+@keyframes captainToast {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.92);
+  }
+  15%, 78% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-button,
+  .game-button::after,
+  .game-button-selected {
+    animation: none !important;
+    transition: none !important;
+  }
+}
