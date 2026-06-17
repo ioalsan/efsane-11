@@ -153,7 +153,7 @@ WORLD_CUP_GROUPS = {
         ("united-states", "ABD", "United States"),
         ("paraguay", "Paraguay", "Paraguay"),
         ("australia", "Avustralya", "Australia"),
-        ("turkiye", "Türkiye", "Turkey"),
+        ("turkiye", "Türkiye", "Türkiye"),
     ],
     "E": [
         ("germany", "Almanya", "Germany"),
@@ -240,6 +240,35 @@ POSITION_BASE = {
 RATING_OVERRIDES = {
     "401923": 91,
     "541537": 83,
+}
+
+CURATED_NATIONAL_PLAYERS = {
+    "haiti": [
+        ("Johny Placide", "GK", 70),
+        ("Alexandre Pierre", "GK", 66),
+        ("Garissone Innocent", "GK", 65),
+        ("Ricardo Adé", "CB", 69),
+        ("Mechack Jérôme", "CB", 67),
+        ("Alex Christian", "LB", 66),
+        ("Dany Jean", "LW", 67),
+        ("Leverton Pierre", "DM", 68),
+        ("Bryan Alcéus", "CM", 67),
+        ("Duckens Nazon", "ST", 72),
+        ("Ronaldo Damus", "ST", 68),
+    ],
+    "curacao": [
+        ("Eloy Room", "GK", 72),
+        ("Leandro Bacuna", "CM", 72),
+        ("Cuco Martina", "RB", 69),
+        ("Kenji Gorré", "LW", 69),
+        ("Jürgen Locadia", "ST", 71),
+        ("Rangelo Janga", "ST", 68),
+    ],
+    "iran": [
+        ("Alireza Beiranvand", "GK", 75),
+        ("Hossein Kanani", "CB", 73),
+        ("Milad Mohammadi", "LB", 72),
+    ],
 }
 
 
@@ -434,25 +463,32 @@ def create_world_cup_data(players_source):
                     "sourcePlayerId": int(source_player_id),
                 })
 
+            generated_count = len(team_player_ids)
             while len(team_player_ids) < 26:
                 number = len(team_player_ids) + 1
-                placeholder_id = f"nt-{team_id}-placeholder-{number}"
-                primary = "GK" if number <= 3 else "CB" if number <= 10 else "CM" if number <= 18 else "ST"
-                team_player_ids.append(placeholder_id)
-                ratings.append(64)
+                curated_index = number - generated_count - 1
+                curated = CURATED_NATIONAL_PLAYERS.get(team_id, [])
+                if curated_index < 0 or curated_index >= len(curated):
+                    raise RuntimeError(f"Yetersiz milli takım verisi: {team_name} ({len(team_player_ids)}/26)")
+                player_name, primary, rating = curated[curated_index]
+                curated_id = f"nt-{team_id}-{normalize(player_name)}"
+                if curated_id in team_player_ids:
+                    curated_id = f"{curated_id}-{number}"
+                team_player_ids.append(curated_id)
+                ratings.append(rating)
                 national_players.append({
-                    "id": placeholder_id,
+                    "id": curated_id,
                     "teamId": team_id,
-                    "name": f"Player {number}",
+                    "name": player_name,
                     "playerType": "nationalTeam",
                     "number": number,
                     "primaryPosition": primary,
                     "secondaryPositions": [],
-                    "rating": 64,
+                    "rating": rating,
                     "form": 0,
                     "nationality": nationality,
                     "isActive": True,
-                    "attributes": attributes_for(placeholder_id, 64, primary),
+                    "attributes": attributes_for(curated_id, rating, primary),
                 })
 
             national_teams.append({

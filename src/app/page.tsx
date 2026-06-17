@@ -24,6 +24,7 @@ export default function Home() {
   const setSetup = useTeamStore((state) => state.setSetup);
   const loadSharedTeam = useTeamStore((state) => state.loadSharedTeam);
   const captainId = useTeamStore((state) => state.captainId);
+  const setCaptain = useTeamStore((state) => state.setCaptain);
   const theme = useTeamStore((state) => state.theme);
   const toggleTheme = useTeamStore((state) => state.toggleTheme);
   const squadName = useTeamStore((state) => state.squadName);
@@ -41,6 +42,7 @@ export default function Home() {
   const [pendingBlindMode, setPendingBlindMode] = useState(blindMode);
   const loadedShareRef = useRef(false);
   const savedDraftRef = useRef<string | null>(null);
+  const captainPanelRef = useRef<HTMLDivElement | null>(null);
 
   const handleFormationSelect = (nextFormation: FormationType) => {
     setPendingFormation(nextFormation);
@@ -55,9 +57,20 @@ export default function Home() {
     setSetup(pendingFormation, pendingMentality, pendingBlindMode, pendingCompetitionId);
   };
 
-  const isTeamFull = selectedPlayers.filter((p) => p !== null).length === 11;
+  const selectedCount = selectedPlayers.filter((p) => p !== null).length;
+  const isTeamFull = selectedCount === 11;
   const hasCaptain = Boolean(captainId && selectedPlayers.some((player) => player?.id === captainId));
   const canStartTournament = isTeamFull && hasCaptain;
+  const bestCaptain = selectedPlayers
+    .filter((player) => player !== null)
+    .sort((a, b) => b.overall_rating - a.overall_rating)[0] ?? null;
+  const flowMessage = !setupComplete
+    ? '1/7 Turnuva, diziliş ve zihniyet seç.'
+    : !isTeamFull
+      ? `3/7 11 oyuncu seç. Şu an ${selectedCount}/11.`
+      : !hasCaptain
+        ? '4/7 Kadron tamamlandı. Maça başlamadan önce kaptanını seç.'
+        : '5/7 Hazırsın. Turnuvayı başlat.';
 
   useEffect(() => {
     if (loadedShareRef.current) return;
@@ -90,6 +103,17 @@ export default function Home() {
       competitionId,
     });
   }, [captainId, competitionId, formationId, hasCaptain, isTeamFull, selectedPlayers, teamRating]);
+
+  useEffect(() => {
+    if (!setupComplete || !isTeamFull || hasCaptain) return;
+    if (!window.matchMedia('(max-width: 1023px)').matches) return;
+
+    const timer = window.setTimeout(() => {
+      captainPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [hasCaptain, isTeamFull, setupComplete]);
 
   if (appPhase === 'tournament') {
     return (
@@ -137,6 +161,40 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      <section className={`sticky top-0 z-40 border-b-2 border-black px-4 py-3 font-mono shadow-[0_4px_0px_0px_rgba(0,0,0,0.25)] lg:static lg:shadow-none ${isDark ? 'bg-zinc-950 text-white' : 'bg-yellow-50 text-black'}`}>
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-yellow-500">Sıradaki adım</p>
+            <p className="mt-1 text-xs font-black uppercase sm:text-sm">{flowMessage}</p>
+            {isTeamFull && !hasCaptain && (
+              <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-red-500">
+                Devam etmek için kaptan seçmelisin.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {setupComplete && isTeamFull && !hasCaptain && bestCaptain && (
+              <button
+                type="button"
+                onClick={() => setCaptain(bestCaptain.id)}
+                className="game-button border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+              >
+                En yüksek ratingli oyuncuyu kaptan yap
+              </button>
+            )}
+            {canStartTournament && (
+              <button
+                type="button"
+                onClick={() => setAppPhase('tournament')}
+                className="game-button border-2 border-black bg-green-600 px-4 py-3 text-xs font-black uppercase text-white shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+              >
+                Turnuvayı Başlat
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
 
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
           
@@ -244,26 +302,27 @@ export default function Home() {
               </div>
            </div>
            ) : (
-             <PlayerList side="left" />
+             <div ref={captainPanelRef} className="w-full lg:h-full lg:w-auto">
+               <PlayerList side="left" />
+             </div>
            )}
            
           {/* CENTER: PITCH */}
           <div className="flex-1 p-4 lg:p-12 flex flex-col items-center justify-center overflow-y-auto bg-black/5">
             <div className="w-full max-w-[728px] relative">
               <AdSlot placement="pitch-top" className="mb-6 hidden md:block" />
-              <Pitch previewFormationId={setupComplete ? null : pendingFormation} />
-              
               <button 
                 onClick={() => canStartTournament && setAppPhase('tournament')}
                 disabled={!canStartTournament}
-                className={`game-button game-button-major mt-10 w-full py-8 font-black text-4xl italic tracking-tighter transition-all border-4 border-black
+                className={`game-button game-button-major mb-6 w-full py-6 font-black text-3xl italic tracking-tighter transition-all border-4 border-black sm:text-4xl
                   ${!canStartTournament
                     ? 'bg-zinc-300 text-zinc-500 cursor-not-allowed opacity-50' 
                     : 'bg-green-600 text-white shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-0 active:translate-y-0'}
                 `}
               >
-                {!isTeamFull ? `KADROYU TAMAMLA (${selectedPlayers.filter(p => p !== null).length}/11)` : !hasCaptain ? 'KAPTAN SEC' : 'TURNUVAYI BAŞLAT ⚔️'}
+                {!isTeamFull ? `KADROYU TAMAMLA (${selectedCount}/11)` : !hasCaptain ? 'KAPTAN SEÇ' : 'TURNUVAYI BAŞLAT ⚔️'}
               </button>
+              <Pitch previewFormationId={setupComplete ? null : pendingFormation} />
               {setupComplete && <ShareExportPanel isTeamFull={isTeamFull} hasCaptain={hasCaptain} />}
             </div>
           </div>

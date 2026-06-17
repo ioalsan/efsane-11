@@ -53,6 +53,7 @@ test('stores complete player profiles without mock records', () => {
   const playerIds = new Set<string>();
   const teamNumbers = new Set<string>();
   const teamNames = new Map(dataset.teams.map((team) => [team.id, team.name]));
+  const placeholderName = /^(Player|Oyuncu)\s*\d+$/i;
   const syntheticSuffixes = /^(kaleci|sağ bek|sag bek|sol bek|stoper|defans|orta saha|sağ kanat|sag kanat|sol kanat|forvet|gk|cb|lb|rb|dm|cm|am|lw|rw|st)$/iu;
   assert.ok(dataset.players.length > 3000);
   for (const player of dataset.players) {
@@ -66,9 +67,10 @@ test('stores complete player profiles without mock records', () => {
     assert.ok(player.number >= 1);
     assert.ok(player.primaryPosition);
     assert.ok(Array.isArray(player.secondaryPositions));
-    assert.ok(player.rating >= 1 && player.rating <= 99);
+    assert.ok(player.rating >= 40 && player.rating <= 99);
     assert.ok(Number.isFinite(player.form));
     assert.ok(player.nationality);
+    assert.ok(!placeholderName.test(player.name), `Placeholder oyuncu adı bulundu: ${player.name}`);
     assert.deepEqual(
       Object.keys(player.attributes).sort(),
       ['attack', 'defense', 'dribbling', 'goalkeeping', 'pace', 'passing', 'shooting'],
@@ -79,6 +81,44 @@ test('stores complete player profiles without mock records', () => {
       assert.ok(!syntheticSuffixes.test(suffix), `Takım + mevki oyuncu adı bulundu: ${player.name}`);
     }
   }
+});
+
+test('validates every competition squad and the Türkiye World Cup roster', () => {
+  const playersByTeam = new Map<string, typeof dataset.players>();
+  for (const player of dataset.players) {
+    const teamPlayers = playersByTeam.get(player.teamId) ?? [];
+    teamPlayers.push(player);
+    playersByTeam.set(player.teamId, teamPlayers);
+  }
+
+  const placeholderName = /^(Player|Oyuncu)\s*\d+$/i;
+  for (const competition of dataset.competitions) {
+    for (const teamId of competition.teams) {
+      const teamPlayers = playersByTeam.get(teamId) ?? [];
+      assert.ok(teamPlayers.length >= 11, `${competition.competitionName}/${teamId} kadrosu 11 oyuncudan az`);
+      for (const player of teamPlayers) {
+        assert.ok(player.name.trim(), `${teamId} içinde boş oyuncu adı`);
+        assert.ok(!placeholderName.test(player.name), `${teamId} içinde placeholder oyuncu: ${player.name}`);
+        assert.ok(player.rating >= 40 && player.rating <= 99, `${player.name} rating aralığı dışında`);
+        assert.ok(player.primaryPosition.trim(), `${player.name} primaryPosition boş`);
+      }
+    }
+  }
+
+  const worldCup = dataset.competitions.find((competition) => competition.competitionId === 'world-cup-2026');
+  const turkiye = dataset.teams.find((team) => team.id === 'turkiye');
+  assert.ok(worldCup);
+  assert.ok(turkiye);
+  assert.ok(worldCup.teams.includes(turkiye.id));
+
+  const turkiyePlayers = playersByTeam.get(turkiye.id) ?? [];
+  const turkiyeNames = new Set(turkiyePlayers.map((player) => player.name));
+  assert.ok(turkiyePlayers.length >= 26);
+  for (const expectedName of ['Kenan Yıldız', 'Arda Güler', 'Hakan Çalhanoğlu', 'Barış Alper Yılmaz']) {
+    assert.ok(turkiyeNames.has(expectedName), `Türkiye kadrosunda eksik: ${expectedName}`);
+  }
+  assert.ok(turkiyePlayers.some((player) => player.rating >= 85), 'Türkiye kadrosunda yıldız oyuncu ratingi yok');
+  assert.ok(turkiyePlayers.every((player) => player.playerType === 'nationalTeam'));
 });
 
 test('keeps club and national-team player pools separate', () => {

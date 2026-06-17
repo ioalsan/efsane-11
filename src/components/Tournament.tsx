@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState, useSyncExternalStore } from 'react';
-import { Activity, AlertTriangle, Crown, Play, Shield, Trophy } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Activity, AlertTriangle, ClipboardCopy, Crown, ListChecks, Play, Shield, Trophy } from 'lucide-react';
 import { useTeamStore } from '@/store/useTeamStore';
 import {
   calculateStandings,
@@ -51,11 +51,20 @@ interface PendingSimulation {
   fixtures: CompetitionFixture[];
 }
 
+interface PlayedMatchEntry {
+  fixture: CompetitionFixture;
+  stageLabel: string;
+}
+
 const finalScore = (fixture: CompetitionFixture) => {
   const result = fixture.result;
   if (!result) return null;
   return result.extraTime ?? result.normalTime;
 };
+
+const matchHistoryKey = (fixture: CompetitionFixture) => (
+  `${fixture.stage}:${fixture.groupId ?? 'all'}:${fixture.id}`
+);
 
 const standingSort = (a: StandingRow, b: StandingRow) => (
   b.points - a.points ||
@@ -172,11 +181,31 @@ export default function Tournament({ userRating }: { userRating: number }) {
     initialKnockoutStage ? generateKnockoutRound(initialKnockoutTeams, initialKnockoutStage) : [],
   );
   const [latestFixture, setLatestFixture] = useState<CompetitionFixture | null>(null);
+  const [playedMatches, setPlayedMatches] = useState<PlayedMatchEntry[]>([]);
   const [liveFixture, setLiveFixture] = useState<CompetitionFixture | null>(null);
   const [pendingSimulation, setPendingSimulation] = useState<PendingSimulation | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [finishedMessage, setFinishedMessage] = useState<string | null>(null);
   const [champion, setChampion] = useState(false);
+  const [autoContinue, setAutoContinue] = useState(false);
+  const [autoAdvanceToken, setAutoAdvanceToken] = useState(0);
+  const liveMatchRef = useRef<HTMLDivElement | null>(null);
+  const finalResultRef = useRef<HTMLElement | null>(null);
+  const autoContinueRef = useRef(false);
+
+  const scrollToMobileTarget = useCallback((target: HTMLElement | null) => {
+    if (!target) return;
+    if (!window.matchMedia('(max-width: 767px)').matches) return;
+
+    window.setTimeout(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }, []);
+
+  useEffect(() => {
+    if (!liveFixture) return;
+    scrollToMobileTarget(liveMatchRef.current);
+  }, [liveFixture, scrollToMobileTarget]);
 
   if (!competition || teams.length < 2) {
     return <div className="border-4 border-black bg-red-600 p-8 font-black text-white">Turnuva verisi bulunamadı.</div>;
@@ -212,7 +241,47 @@ export default function Tournament({ userRating }: { userRating: number }) {
       ? roundLabels[knockoutStage]
       : 'Turnuva Tamamlandı';
 
+  const hasPlayableStage = !finishedMessage && !liveFixture && !isSimulating && (
+    inOpeningStage ? currentOpeningRound.length > 0 : knockoutFixtures.length > 0
+  );
+
   const teamName = (teamId: string) => teamMap.get(teamId)?.name ?? teamId;
+
+  const addPlayedMatches = (fixtures: CompetitionFixture[], stageLabel: string) => {
+    const completedFixtures = fixtures.filter((fixture) => fixture.result);
+    if (completedFixtures.length === 0) return;
+
+    setPlayedMatches((currentMatches) => {
+      const existingKeys = new Set(currentMatches.map((entry) => matchHistoryKey(entry.fixture)));
+      const additions = completedFixtures
+        .filter((fixture) => !existingKeys.has(matchHistoryKey(fixture)))
+        .map((fixture) => ({ fixture, stageLabel }));
+
+      if (additions.length === 0) return currentMatches;
+      return [...currentMatches, ...additions];
+    });
+  };
+
+  const formatScoreLabel = (fixture: CompetitionFixture) => {
+    const score = finalScore(fixture);
+    if (!fixture.result || !score) return 'VS';
+
+    const details = [`${score.home} - ${score.away}`];
+    if (fixture.result.extraTime) {
+      details.push(`90 dk: ${fixture.result.normalTime.home}-${fixture.result.normalTime.away}`);
+    }
+    if (fixture.result.penalties) {
+      details.push(`Pen: ${fixture.result.penalties.home}-${fixture.result.penalties.away}`);
+    }
+    return details.join(' / ');
+  };
+
+  const formatPlayedMatchLine = (entry: PlayedMatchEntry, index: number) => {
+    const winnerLabel = entry.fixture.stage !== 'league' && entry.fixture.stage !== 'group' && entry.fixture.result?.winnerId
+      ? ` / Tur: ${teamName(entry.fixture.result.winnerId)}`
+      : '';
+    return `${index + 1}. [${entry.stageLabel}] ${teamName(entry.fixture.homeTeamId)} ${formatScoreLabel(entry.fixture)} ${teamName(entry.fixture.awayTeamId)}${winnerLabel}`;
+  };
 
   const recordOutcome = (outcome: 'champion' | 'eliminated', headline: string) => {
     if (!formationId) return;
@@ -283,6 +352,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
       (fixture) => fixture.homeTeamId === USER_TEAM_ID || fixture.awayTeamId === USER_TEAM_ID,
     );
     if (userFixture) setLatestFixture(userFixture);
+    addPlayedMatches(playedRound, currentStageLabel);
     setOpeningRounds(nextRounds);
     if (currentRoundIndex >= openingRounds.length - 1) completeOpeningStage(nextRounds);
     else setCurrentRoundIndex((value) => value + 1);
@@ -294,6 +364,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
     );
     if (userFixture) setLatestFixture(userFixture);
     setKnockoutFixtures(playedFixtures);
+    addPlayedMatches(playedFixtures, knockoutStage ? roundLabels[knockoutStage] : 'Eleme');
     const winners = getKnockoutWinners(playedFixtures);
 
     if (!winners.includes(USER_TEAM_ID) && userFixture) {
@@ -346,6 +417,17 @@ export default function Tournament({ userRating }: { userRating: number }) {
     }
   };
 
+  const startCurrentStageSimulation = () => {
+    if (!hasPlayableStage) return;
+    if (inOpeningStage) startSimulation(currentOpeningRound, false, 'opening');
+    else startSimulation(knockoutFixtures, true, 'knockout');
+  };
+
+  const scheduleAutoContinue = () => {
+    if (!autoContinueRef.current) return;
+    setAutoAdvanceToken((value) => value + 1);
+  };
+
   const handleLiveComplete = () => {
     if (!pendingSimulation) return;
     if (pendingSimulation.mode === 'opening') finalizeOpeningRound(pendingSimulation.fixtures);
@@ -353,14 +435,60 @@ export default function Tournament({ userRating }: { userRating: number }) {
     setLiveFixture(null);
     setPendingSimulation(null);
     setIsSimulating(false);
+    scheduleAutoContinue();
   };
 
   const latestResult = latestFixture?.result;
+
+  const toggleAutoContinue = () => {
+    const nextValue = !autoContinueRef.current;
+    autoContinueRef.current = nextValue;
+    setAutoContinue(nextValue);
+    if (nextValue && latestResult && hasPlayableStage) scheduleAutoContinue();
+  };
+
   const latestHome = latestFixture ? teamName(latestFixture.homeTeamId) : '';
   const latestAway = latestFixture ? teamName(latestFixture.awayTeamId) : '';
+  const primaryActionLabel = latestResult ? 'Sonraki Maç' : `${currentStageLabel} Oyna`;
+  const showMobileActionBar = !liveFixture && (hasPlayableStage || Boolean(finishedMessage));
+  const showStandingsPanel = competition.format === 'league' || inOpeningStage || standings.some((row) => row.played > 0);
+  const visiblePlayedMatches = playedMatches.filter(({ fixture }) => {
+    if (competition.format !== 'world_cup_48') return true;
+    if (fixture.stage === 'group') return fixture.groupId === userGroup?.groupId;
+    return true;
+  });
+  const tournamentOutput = [
+    `${competition.competitionName} - ${competition.season}`,
+    `Kadro: ${squadName}`,
+    `Sonuç: ${finishedMessage ?? 'Turnuva devam ediyor.'}`,
+    '',
+    ...(showStandingsPanel
+      ? [
+        'Puan Durumu:',
+        ...standings.map((row, index) => (
+          `${index + 1}. ${teamName(row.teamId)} - O:${row.played} G:${row.wins} B:${row.draws} M:${row.losses} AV:${row.goalDifference} P:${row.points}`
+        )),
+        '',
+      ]
+      : []),
+    'Oynanan Maçlar:',
+    ...(visiblePlayedMatches.length > 0
+      ? visiblePlayedMatches.map(formatPlayedMatchLine)
+      : ['Henüz maç oynanmadı.']),
+  ].join('\n');
+
+  const copyTournamentOutput = () => {
+    void navigator.clipboard?.writeText(tournamentOutput);
+  };
 
   return (
-    <div className={`mx-auto w-full max-w-7xl border-4 border-black p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-8 ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
+    <div className={`mx-auto w-full max-w-7xl border-4 border-black p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-8 ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-8' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
+      <AutoContinueRunner
+        token={autoAdvanceToken}
+        enabled={autoContinue}
+        canRun={hasPlayableStage}
+        onRun={startCurrentStageSimulation}
+      />
       <AdSlot placement="result" className="mb-7 hidden md:block" />
 
       <header className="flex flex-col gap-5 border-b-4 border-black pb-6 lg:flex-row lg:items-center lg:justify-between">
@@ -381,20 +509,83 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </div>
       </header>
 
+      <section className={`mt-5 flex flex-col gap-3 border-2 border-black p-4 shadow-[4px_4px_0px_0px_#000] sm:flex-row sm:items-center sm:justify-between ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-yellow-500">Otomatik devam et</p>
+          <p className="mt-1 text-[11px] font-bold opacity-60">
+            Açıkken maç biter, kısa sonuç görünür ve 1.6 saniye sonra sonraki maç başlar.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-pressed={autoContinue}
+          onClick={toggleAutoContinue}
+          className={`game-button flex items-center justify-center gap-3 border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_#000] ${autoContinue ? 'bg-green-500 text-black' : 'bg-white text-black'}`}
+        >
+          <span className={`relative h-5 w-10 border-2 border-black ${autoContinue ? 'bg-black' : 'bg-zinc-300'}`}>
+            <span className={`absolute top-1/2 h-3 w-3 -translate-y-1/2 bg-yellow-400 transition-transform ${autoContinue ? 'translate-x-5' : 'translate-x-1'}`} />
+          </span>
+          {autoContinue ? 'Açık' : 'Kapalı'}
+        </button>
+      </section>
+
+      {!liveFixture && hasPlayableStage && (
+        <section className="sticky top-2 z-30 mt-4 border-2 border-black bg-green-600 p-3 text-white shadow-[5px_5px_0px_0px_#000] md:hidden">
+          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/75">
+            6/7 Maç simülasyonunu izle
+          </p>
+          <button
+            type="button"
+            onClick={startCurrentStageSimulation}
+            className="game-button flex w-full items-center justify-center gap-2 border-2 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+          >
+            <Play size={18} fill="currentColor" />
+            {primaryActionLabel}
+          </button>
+        </section>
+      )}
+
       {liveFixture?.result && (
-        <LiveMatchPanel
-          fixture={liveFixture}
-          result={liveFixture.result}
-          homeName={teamName(liveFixture.homeTeamId)}
-          awayName={teamName(liveFixture.awayTeamId)}
-          onComplete={handleLiveComplete}
-        />
+        <div ref={liveMatchRef} className="scroll-mt-4 md:scroll-mt-8">
+          <LiveMatchPanel
+            fixture={liveFixture}
+            result={liveFixture.result}
+            homeName={teamName(liveFixture.homeTeamId)}
+            awayName={teamName(liveFixture.awayTeamId)}
+            onComplete={handleLiveComplete}
+          />
+        </div>
       )}
 
       {finishedMessage && (
-        <section className={`mt-7 border-4 border-black p-7 text-center shadow-[7px_7px_0px_0px_#000] ${champion ? 'bg-yellow-500 text-black' : 'bg-red-600 text-white'}`}>
+        <section ref={finalResultRef} className={`mt-7 scroll-mt-4 border-4 border-black p-7 text-center shadow-[7px_7px_0px_0px_#000] md:scroll-mt-8 ${champion ? 'bg-yellow-500 text-black' : 'bg-red-600 text-white'}`}>
           {champion ? <Crown className="mx-auto mb-3" size={45} fill="currentColor" /> : <Shield className="mx-auto mb-3" size={45} />}
           <h3 className="text-3xl font-black uppercase italic tracking-tighter">{finishedMessage}</h3>
+        </section>
+      )}
+
+      {finishedMessage && (
+        <section className={`mt-7 border-4 border-black p-5 shadow-[6px_6px_0px_0px_#000] ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
+          <div className="flex flex-col gap-3 border-b-2 border-black pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-yellow-500">Turnuva Çıktısı</p>
+              <h3 className="text-xl font-black uppercase italic">Özet ve maç dökümü</h3>
+            </div>
+            <button
+              type="button"
+              onClick={copyTournamentOutput}
+              className="game-button flex items-center justify-center gap-2 border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              <ClipboardCopy size={16} />
+              Çıktıyı Kopyala
+            </button>
+          </div>
+          <textarea
+            readOnly
+            value={tournamentOutput}
+            rows={Math.min(16, Math.max(8, tournamentOutput.split('\n').length))}
+            className={`mt-4 w-full resize-y border-2 border-black p-4 text-xs font-black leading-relaxed outline-none ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}
+          />
         </section>
       )}
 
@@ -456,20 +647,18 @@ export default function Tournament({ userRating }: { userRating: number }) {
           {!finishedMessage && (
             <button
               type="button"
-              onClick={() => inOpeningStage
-                ? startSimulation(currentOpeningRound, false, 'opening')
-                : startSimulation(knockoutFixtures, true, 'knockout')}
-              disabled={isSimulating}
-              className="game-button game-button-major mt-6 flex w-full items-center justify-center gap-3 border-4 border-black bg-green-600 px-6 py-6 text-2xl font-black uppercase italic text-white shadow-[8px_8px_0px_0px_#000] disabled:opacity-50"
+              onClick={startCurrentStageSimulation}
+              disabled={!hasPlayableStage}
+              className="game-button game-button-major mt-6 hidden w-full items-center justify-center gap-3 border-4 border-black bg-green-600 px-6 py-6 text-2xl font-black uppercase italic text-white shadow-[8px_8px_0px_0px_#000] disabled:opacity-50 md:flex"
             >
               <Play size={28} fill="currentColor" />
-              {isSimulating ? 'Maç Canlı...' : `${currentStageLabel} Oyna`}
+              {isSimulating ? 'Maç Canlı...' : primaryActionLabel}
             </button>
           )}
         </section>
 
         <aside className="space-y-6">
-          {(competition.format === 'league' || inOpeningStage || standings.some((row) => row.played > 0)) && (
+          {showStandingsPanel && (
             <section className="border-4 border-black bg-zinc-100 p-4 text-black shadow-[6px_6px_0px_0px_#000]">
               <h3 className="border-b-2 border-black pb-3 text-lg font-black uppercase italic">
                 {competition.format === 'world_cup_48' ? `${userGroup?.groupName ?? 'Grup'} Puan Durumu` : 'Puan Durumu'}
@@ -491,6 +680,14 @@ export default function Tournament({ userRating }: { userRating: number }) {
             </section>
           )}
 
+          {visiblePlayedMatches.length > 0 && (
+            <PlayedMatchesPanel
+              entries={visiblePlayedMatches}
+              formatScoreLabel={formatScoreLabel}
+              teamName={teamName}
+            />
+          )}
+
           {!liveFixture && latestResult && (
             <section className="border-4 border-black bg-zinc-900 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
               <h3 className="flex items-center gap-2 border-b border-white/15 pb-3 text-sm font-black uppercase">
@@ -504,8 +701,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
                   <p key={`${incident.minute}-${incident.playerName}-${index}`} className="text-xs font-black">
                     {incident.minute}&apos; {
                       incident.type === 'yellow-card' ? 'Sarı kart' :
-                        incident.type === 'red-card' ? 'Kırmızı kart' :
-                          incident.type === 'injury' ? 'Küçük sakatlık' : 'Oyuncu değişikliği'
+                        incident.type === 'red-card' ? 'Kırmızı kart' : 'Küçük sakatlık'
                     }: {incident.playerName}
                   </p>
                 ))}
@@ -520,7 +716,107 @@ export default function Tournament({ userRating }: { userRating: number }) {
           )}
         </aside>
       </div>
+
+      {showMobileActionBar && (
+        <div className="fixed inset-x-0 bottom-16 z-[95] px-3 pb-[env(safe-area-inset-bottom)] md:hidden">
+          <div className="mx-auto max-w-md border-2 border-black bg-zinc-950 p-3 text-white shadow-[5px_5px_0px_0px_#000]">
+            {hasPlayableStage && (
+              <button
+                type="button"
+                aria-pressed={autoContinue}
+                onClick={toggleAutoContinue}
+                className={`mb-2 flex w-full items-center justify-between border-2 border-white/20 px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] ${autoContinue ? 'bg-green-500 text-black' : 'bg-zinc-900 text-white'}`}
+              >
+                <span>Otomatik devam et</span>
+                <span>{autoContinue ? 'Açık' : 'Kapalı'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={finishedMessage ? () => scrollToMobileTarget(finalResultRef.current) : startCurrentStageSimulation}
+              className="game-button flex w-full items-center justify-center gap-2 border-2 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              <Play size={18} fill="currentColor" />
+              {finishedMessage ? 'Turnuva Sonucu' : primaryActionLabel}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function AutoContinueRunner({
+  token,
+  enabled,
+  canRun,
+  onRun,
+}: {
+  token: number;
+  enabled: boolean;
+  canRun: boolean;
+  onRun: () => void;
+}) {
+  const onRunRef = useRef(onRun);
+
+  useEffect(() => {
+    onRunRef.current = onRun;
+  }, [onRun]);
+
+  useEffect(() => {
+    if (token === 0 || !enabled || !canRun) return;
+
+    const timer = window.setTimeout(() => {
+      onRunRef.current();
+    }, 1600);
+
+    return () => window.clearTimeout(timer);
+  }, [canRun, enabled, token]);
+
+  return null;
+}
+
+function PlayedMatchesPanel({
+  entries,
+  formatScoreLabel,
+  teamName,
+}: {
+  entries: PlayedMatchEntry[];
+  formatScoreLabel: (fixture: CompetitionFixture) => string;
+  teamName: (teamId: string) => string;
+}) {
+  const latestFirstEntries = [...entries].reverse();
+
+  return (
+    <section className="border-4 border-black bg-white p-4 text-black shadow-[6px_6px_0px_0px_#000]">
+      <h3 className="flex items-center gap-2 border-b-2 border-black pb-3 text-lg font-black uppercase italic">
+        <ListChecks size={20} className="text-yellow-600" />
+        Oynanan Maçlar
+      </h3>
+      <div className="mt-3 max-h-[430px] space-y-2 overflow-y-auto pr-1">
+        {latestFirstEntries.map((entry) => {
+          const fixture = entry.fixture;
+          const isUserMatch = fixture.homeTeamId === USER_TEAM_ID || fixture.awayTeamId === USER_TEAM_ID;
+
+          return (
+            <div
+              key={matchHistoryKey(fixture)}
+              className={`border-2 border-black p-3 text-xs font-black shadow-[3px_3px_0px_0px_#000] ${isUserMatch ? 'bg-yellow-400' : 'bg-zinc-100'}`}
+            >
+              <div className="mb-2 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.14em] opacity-60">
+                <span className="truncate">{entry.stageLabel}</span>
+                <span className="shrink-0">{formatScoreLabel(fixture)}</span>
+              </div>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <span className="truncate text-right uppercase">{teamName(fixture.homeTeamId)}</span>
+                <span className="text-[10px] opacity-50">VS</span>
+                <span className="truncate text-left uppercase">{teamName(fixture.awayTeamId)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

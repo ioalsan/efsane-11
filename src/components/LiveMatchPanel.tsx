@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { FastForward, Flag, Gauge, HeartPulse, RefreshCw, ShieldAlert, SkipForward } from 'lucide-react';
@@ -25,15 +25,13 @@ const incidentText = (incident: MatchIncident, teamName: string) => {
   if (incident.type === 'goal') return `GOL - ${teamName}: ${incident.playerName}`;
   if (incident.type === 'yellow-card') return `Sarı kart - ${incident.playerName}`;
   if (incident.type === 'red-card') return `Kırmızı kart - ${incident.playerName}`;
-  if (incident.type === 'injury') return `Sakatlık - ${incident.playerName}`;
-  return `Oyuncu değişikliği - ${incident.relatedPlayerName} çıktı, ${incident.playerName} girdi`;
+  return `Sakatlık - ${incident.playerName}`;
 };
 
 const incidentTone = (incident: MatchIncident): TimelineEntry['tone'] => {
   if (incident.type === 'goal') return 'goal';
   if (incident.type === 'yellow-card') return 'warning';
-  if (incident.type === 'red-card' || incident.type === 'injury') return 'danger';
-  return 'change';
+  return 'danger';
 };
 
 const toneClasses: Record<TimelineEntry['tone'], string> = {
@@ -44,6 +42,13 @@ const toneClasses: Record<TimelineEntry['tone'], string> = {
   change: 'border-blue-400 bg-blue-500/15 text-blue-200',
   penalty: 'border-purple-400 bg-purple-500/15 text-purple-200',
 };
+
+const createInitialTimeline = (): TimelineEntry[] => [{
+  id: 'kick-off',
+  minute: "0'",
+  text: 'Maç başladı',
+  tone: 'neutral',
+}];
 
 export default function LiveMatchPanel({
   fixture,
@@ -62,16 +67,10 @@ export default function LiveMatchPanel({
   const [phase, setPhase] = useState<MatchPhase>('normal');
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [penaltyScore, setPenaltyScore] = useState({ home: 0, away: 0 });
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([{
-    id: 'kick-off',
-    minute: "0'",
-    text: 'Maç başladı',
-    tone: 'neutral',
-  }]);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>(createInitialTimeline);
   const [speed, setSpeed] = useState<'normal' | 'fast'>('normal');
   const speedRef = useRef<'normal' | 'fast'>('normal');
   const skipRef = useRef(false);
-  const startedRef = useRef(false);
   const completeRef = useRef(onComplete);
 
   useEffect(() => {
@@ -83,15 +82,25 @@ export default function LiveMatchPanel({
   };
 
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
     let cancelled = false;
     let runningScore = { home: 0, away: 0 };
+    skipRef.current = false;
+    speedRef.current = 'normal';
 
     const wait = async () => {
       if (skipRef.current) return;
       const duration = speedRef.current === 'fast' ? 90 : 430;
       await new Promise<void>((resolve) => window.setTimeout(resolve, duration));
+    };
+
+    const resetMatchState = () => {
+      runningScore = { home: 0, away: 0 };
+      setMinute(0);
+      setPhase('normal');
+      setScore(runningScore);
+      setPenaltyScore({ home: 0, away: 0 });
+      setTimeline(createInitialTimeline());
+      setSpeed('normal');
     };
 
     const revealIncident = async (incident: MatchIncident, index: number) => {
@@ -152,6 +161,10 @@ export default function LiveMatchPanel({
     };
 
     const run = async () => {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      if (cancelled) return;
+      resetMatchState();
+
       const normalIncidents = result.incidents.filter((incident) => incident.minute <= 90);
       await playMinutes(1, 90, CHECKPOINTS, normalIncidents);
       if (cancelled) return;

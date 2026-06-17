@@ -26,8 +26,7 @@ export interface MatchIncident {
   minute: number;
   teamId: string;
   playerName: string;
-  relatedPlayerName?: string;
-  type: 'goal' | 'yellow-card' | 'red-card' | 'injury' | 'substitution';
+  type: 'goal' | 'yellow-card' | 'red-card' | 'injury';
 }
 
 export interface PenaltyKick {
@@ -231,21 +230,6 @@ const buildIncidents = (
         teamId: team.id,
         playerName: player.name,
         type: 'injury',
-      });
-    }
-    const substitutionCount = 2 + Math.floor(Math.random() * 4);
-    for (let index = 0; index < substitutionCount; index += 1) {
-      const outgoing = randomPlayer(team);
-      const outgoingIndex = outgoing ? team.players.findIndex((player) => player.id === outgoing.id) : -1;
-      const incoming = team.players.length > 1
-        ? team.players[(outgoingIndex + index + 1) % team.players.length]
-        : undefined;
-      if (outgoing && incoming && outgoing.id !== incoming.id) incidents.push({
-        minute: 46 + Math.floor(Math.random() * 40),
-        teamId: team.id,
-        playerName: incoming.name,
-        relatedPlayerName: outgoing.name,
-        type: 'substitution',
       });
     }
   }

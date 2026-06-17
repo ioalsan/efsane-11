@@ -30,6 +30,14 @@ export default function DraggablePlayer({ player }: DraggablePlayerProps) {
       setActivePlayerToPlace(null);
     } else {
       setActivePlayerToPlace(player);
+      if (window.matchMedia('(max-width: 1023px)').matches) {
+        window.setTimeout(() => {
+          document.getElementById('pitch-container')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }, 80);
+      }
     }
   };
 

@@ -151,7 +151,7 @@ export default function SquadPanel() {
 
       <div className="p-6 border-t-2 border-black bg-black/5">
         <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-45 leading-relaxed">
-          Oyuncuya tikla, sahada uygun baska bir slota tasiyabilir ya da degistirebilirsin. {captain ? 'Kaptani degistirmek icin tac ikonuna bas.' : 'Turnuva icin bir kaptan secmelisin.'}
+          Oyuncuya tıkla, sahada uygun başka bir slota taşıyabilir ya da değiştirebilirsin. {captain ? 'Kaptanı değiştirmek için taç ikonuna bas.' : 'Kadron tamamlandıysa devam etmek için kaptan seçmelisin.'}
         </p>
       </div>
       <LeaderboardPanel />

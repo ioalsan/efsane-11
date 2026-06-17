@@ -12,11 +12,13 @@ import type {
 export const DEFAULT_COMPETITION_ID = 'super-lig';
 export const SEASON_DATA_UPDATED_EVENT = 'efsane11:season-data-updated';
 
-const STORAGE_KEY = 'efsane11:season-data:2025-2026:v4';
+const STORAGE_KEY = 'efsane11:season-data:2025-2026:v5';
 const LEGACY_STORAGE_KEYS = [
   'efsane11:season-data:2025-2026',
   'efsane11:season-data:2025-2026:v3',
+  'efsane11:season-data:2025-2026:v4',
 ];
+const PLACEHOLDER_PLAYER_NAME = /^(Player|Oyuncu)\s*\d+$/i;
 const SYNTHETIC_POSITION_SUFFIXES = new Set([
   'kaleci', 'sağ bek', 'sag bek', 'sol bek', 'stoper', 'defans',
   'orta saha', 'sağ kanat', 'sag kanat', 'sol kanat', 'forvet',
@@ -63,10 +65,14 @@ const isSeasonDataset = (value: unknown): value is SeasonDataset => {
     const name = player.name?.trim();
     if (
       !name ||
+      PLACEHOLDER_PLAYER_NAME.test(name) ||
       typeof player.number !== 'number' ||
       (player.playerType !== 'club' && player.playerType !== 'nationalTeam') ||
       typeof player.primaryPosition !== 'string' ||
-      !Array.isArray(player.secondaryPositions)
+      !Array.isArray(player.secondaryPositions) ||
+      typeof player.rating !== 'number' ||
+      player.rating < 40 ||
+      player.rating > 99
     ) return false;
 
     return !isSyntheticPlayerName(name, player.teamId, teams);

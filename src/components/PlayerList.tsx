@@ -60,11 +60,14 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
   const isTeamFull = totalSelected === 11;
   const selectedSquadPlayers = selectedPlayers.filter((player) => player !== null);
   const captain = selectedSquadPlayers.find((player) => player.id === captainId) ?? null;
+  const bestCaptain = selectedSquadPlayers
+    .slice()
+    .sort((a, b) => b.overall_rating - a.overall_rating)[0] ?? null;
   const borderClass = side === 'left' ? 'border-r-2' : 'border-l-2';
 
   if (isTeamFull) {
     return (
-      <div className={`w-full lg:w-80 xl:w-96 flex flex-col h-full ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
+      <div id="player-draft-panel" className={`w-full scroll-mt-24 lg:w-80 xl:w-96 flex flex-col h-full ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
         <div className="border-b-2 border-black bg-yellow-500 p-6 text-black">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -76,8 +79,17 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
             </div>
           </div>
           <p className="mt-4 text-xs font-black uppercase leading-relaxed opacity-75">
-            Turnuva baslamadan once takim liderini sec.
+            Kadron tamamlandı. Maça başlamadan önce kaptanını seç. Devam etmek için kaptan seçmelisin.
           </p>
+          {!captain && bestCaptain && (
+            <button
+              type="button"
+              onClick={() => setCaptain(bestCaptain.id)}
+              className="game-button mt-4 w-full border-2 border-black bg-black px-4 py-3 text-xs font-black uppercase text-yellow-500 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+            >
+              En yüksek ratingli oyuncuyu kaptan yap
+            </button>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
@@ -149,7 +161,7 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
   const availablePlayers = draftList.filter(p => !p.isAlreadyOnPitch);
 
   return (
-    <div className={`w-full lg:w-80 xl:w-96 flex flex-col h-full ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
+    <div id="player-draft-panel" className={`w-full scroll-mt-24 lg:w-80 xl:w-96 flex flex-col h-full ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
       <div className="p-6 border-b-2 border-black bg-black/10 flex justify-between items-center gap-4">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.25em] opacity-45">Draft Paneli</p>

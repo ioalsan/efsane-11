@@ -24,7 +24,7 @@ export default function Pitch({ elementId = 'pitch-container', previewFormationI
   const totalSelected = selectedPlayers.filter(p => p !== null).length;
 
   return (
-    <div id={elementId} className={`relative w-full max-w-2xl aspect-[3/4] sm:aspect-[4/5] mx-auto border-2 border-zinc-800 transition-colors duration-300 ${isDark ? 'bg-[#2d4d3a]' : 'bg-[#4a8a5e]'}`}>
+    <div id={elementId} className={`relative w-full max-w-2xl scroll-mt-24 aspect-[3/4] sm:aspect-[4/5] mx-auto border-2 border-zinc-800 transition-colors duration-300 ${isDark ? 'bg-[#2d4d3a]' : 'bg-[#4a8a5e]'}`}>
       
       {/* Basitleştirilmiş Saha Çizgileri (7a0 Stili) */}
       <div className="absolute top-0 left-0 w-full h-full p-4">

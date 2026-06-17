@@ -46,7 +46,16 @@ export default function DroppableSlot({ index, player, allowedPosition }: Droppa
         const canTargetPlayAtSource = canPlayAt(player, sourceAllowedPos);
         if (!canTargetPlayAtSource) return;
       }
+      const shouldReturnToDraft = sourceSlotIndex === null;
       placePlayer(activePlayerToPlace, index);
+      if (shouldReturnToDraft && window.matchMedia('(max-width: 1023px)').matches) {
+        window.setTimeout(() => {
+          document.getElementById('player-draft-panel')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }, 180);
+      }
     } else if (isSlotFull) {
       setActivePlayerToPlace(player, index);
     }
