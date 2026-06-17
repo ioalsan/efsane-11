@@ -8,11 +8,11 @@ EFSANE-11, 2025-2026 sezonundaki gerçek takım ve oyuncu verileriyle rüya kadr
 - Şampiyonlar Ligi, UEFA Avrupa Ligi ve UEFA Konferans Ligi lig aşaması ile eleme turları.
 - FIFA Dünya Kupası 2026: 48 milli takım, 12 grup, Son 32 ve devam eden eleme turları.
 - Lig maçlarında 3/1/0 puan sistemi; eleme maçlarında uzatma ve zorunlu penaltı kazananı.
-- Dakika dakika canlı skor, gol/kart/sakatlık/değişiklik timeline'ı ve tek tek penaltı atışları.
+- Dakika dakika canlı skor, gol/kart/sakatlık timeline'ı ve tek tek penaltı atışları.
 - Unicode ve UTF-8 uyumlu takım/oyuncu adları.
 - Forma numarası, ana mevki, yan mevkiler, rating, form ve milliyet içeren oyuncu profilleri.
 - Hücum, savunma, pas, hız, şut, dribbling ve kalecilik özelliklerine dayalı maç motoru.
-- Sarı kart, kırmızı kart ve küçük sakatlık olayları.
+- Sarı kart ve küçük sakatlık olayları.
 - Local JSON tabanlı takım, oyuncu, turnuva, reklam ve oyun ayarları admin paneli.
 - Kulüp ve milli takım oyuncularını ayrı kimlik ve kadro havuzlarında tutan veri modeli.
 - Paylaşım linki, Story PNG ve kare kadro görseli dışa aktarımı.
