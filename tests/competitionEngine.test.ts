@@ -131,6 +131,7 @@ test('knockout simulation exposes timed events and individual penalties', () => 
     );
     assert.ok(result.incidents.every((incident) => incident.minute >= 1 && incident.minute <= 120));
     assert.ok(!result.incidents.some((incident) => (incident as { type: string }).type === 'substitution'));
+    assert.ok(!result.incidents.some((incident) => (incident as { type: string }).type === 'red-card'));
     if (result.penalties) {
       assert.ok(result.penaltyKicks && result.penaltyKicks.length >= 10);
       assert.notEqual(result.penalties.home, result.penalties.away);

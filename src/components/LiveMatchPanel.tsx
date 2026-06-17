@@ -1,13 +1,21 @@
 ﻿'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FastForward, Flag, Gauge, HeartPulse, RefreshCw, ShieldAlert, SkipForward } from 'lucide-react';
+import { FastForward, Flag, Gauge, HeartPulse, ShieldAlert, SkipForward } from 'lucide-react';
 import type {
   CompetitionFixture,
   MatchIncident,
   MatchResult,
   PenaltyKick,
 } from '@/lib/competitionEngine';
+import {
+  createMatchAnimationState,
+  eventToAnimationState,
+  flowEventForMinute,
+  type MatchSide,
+  type MatchVisualEvent,
+} from '@/lib/matchAnimation';
+import MatchPitchAnimation from './MatchPitchAnimation';
 
 type MatchPhase = 'normal' | 'extra-time' | 'penalties' | 'finished';
 
@@ -15,7 +23,7 @@ interface TimelineEntry {
   id: string;
   minute: string;
   text: string;
-  tone: 'neutral' | 'goal' | 'warning' | 'danger' | 'change' | 'penalty';
+  tone: 'neutral' | 'goal' | 'warning' | 'danger' | 'penalty';
 }
 
 const CHECKPOINTS = [5, 12, 23, 37, 45, 60, 75, 90];
@@ -24,7 +32,6 @@ const EXTRA_TIME_CHECKPOINTS = [105, 120];
 const incidentText = (incident: MatchIncident, teamName: string) => {
   if (incident.type === 'goal') return `GOL - ${teamName}: ${incident.playerName}`;
   if (incident.type === 'yellow-card') return `Sarı kart - ${incident.playerName}`;
-  if (incident.type === 'red-card') return `Kırmızı kart - ${incident.playerName}`;
   return `Sakatlık - ${incident.playerName}`;
 };
 
@@ -39,7 +46,6 @@ const toneClasses: Record<TimelineEntry['tone'], string> = {
   goal: 'border-green-400 bg-green-500/15 text-green-300',
   warning: 'border-yellow-400 bg-yellow-500/15 text-yellow-200',
   danger: 'border-red-500 bg-red-500/15 text-red-200',
-  change: 'border-blue-400 bg-blue-500/15 text-blue-200',
   penalty: 'border-purple-400 bg-purple-500/15 text-purple-200',
 };
 
@@ -68,6 +74,7 @@ export default function LiveMatchPanel({
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [penaltyScore, setPenaltyScore] = useState({ home: 0, away: 0 });
   const [timeline, setTimeline] = useState<TimelineEntry[]>(createInitialTimeline);
+  const [animationState, setAnimationState] = useState(createMatchAnimationState);
   const [speed, setSpeed] = useState<'normal' | 'fast'>('normal');
   const speedRef = useRef<'normal' | 'fast'>('normal');
   const skipRef = useRef(false);
@@ -84,6 +91,7 @@ export default function LiveMatchPanel({
   useEffect(() => {
     let cancelled = false;
     let runningScore = { home: 0, away: 0 };
+    let animationSequence = 0;
     skipRef.current = false;
     speedRef.current = 'normal';
 
@@ -100,11 +108,27 @@ export default function LiveMatchPanel({
       setScore(runningScore);
       setPenaltyScore({ home: 0, away: 0 });
       setTimeline(createInitialTimeline());
+      setAnimationState(createMatchAnimationState());
       setSpeed('normal');
+    };
+
+    const showAnimation = (
+      event: MatchVisualEvent,
+      side: MatchSide,
+      minuteLabel: string,
+    ) => {
+      animationSequence += 1;
+      setAnimationState(eventToAnimationState({
+        event,
+        side,
+        minuteLabel,
+        sequence: animationSequence,
+      }));
     };
 
     const revealIncident = async (incident: MatchIncident, index: number) => {
       if (cancelled) return;
+      const side: MatchSide = incident.teamId === fixture.homeTeamId ? 'home' : 'away';
       if (incident.type === 'goal') {
         runningScore = {
           home: runningScore.home + (incident.teamId === fixture.homeTeamId ? 1 : 0),
@@ -112,6 +136,11 @@ export default function LiveMatchPanel({
         };
         setScore(runningScore);
       }
+      showAnimation(
+        incident.type === 'goal' ? 'goal' : incident.type === 'yellow-card' ? 'yellowCard' : 'injury',
+        side,
+        `${incident.minute}'`,
+      );
       addEntry({
         id: `incident-${incident.minute}-${index}`,
         minute: `${incident.minute}'`,
@@ -141,7 +170,14 @@ export default function LiveMatchPanel({
         if (cancelled) return;
         setMinute(moment);
         const currentIncidents = incidents.filter((incident) => incident.minute === moment);
-        if (currentIncidents.length === 0) await wait();
+        if (currentIncidents.length === 0) {
+          showAnimation(
+            moment === 45 ? 'halftime' : flowEventForMinute(moment),
+            moment === 45 ? 'neutral' : moment % 2 === 0 ? 'home' : 'away',
+            `${moment}'`,
+          );
+          await wait();
+        }
         for (let index = 0; index < currentIncidents.length; index += 1) {
           await revealIncident(currentIncidents[index], index);
         }
@@ -150,7 +186,9 @@ export default function LiveMatchPanel({
 
     const revealPenalty = async (kick: PenaltyKick) => {
       if (cancelled) return;
+      const side: MatchSide = kick.teamId === fixture.homeTeamId ? 'home' : 'away';
       setPenaltyScore({ home: kick.homeScore, away: kick.awayScore });
+      showAnimation(kick.scored ? 'penaltyGoal' : 'penaltyMiss', side, `P${kick.order}`);
       addEntry({
         id: `penalty-${kick.order}`,
         minute: `P${kick.order}`,
@@ -175,10 +213,12 @@ export default function LiveMatchPanel({
         text: result.extraTime ? 'Normal süre berabere bitti. Uzatma başlıyor.' : 'Normal süre tamamlandı.',
         tone: 'neutral',
       });
+      showAnimation(result.extraTime ? 'extraTime' : 'fulltime', 'neutral', "90'");
       await wait();
 
       if (result.extraTime) {
         setPhase('extra-time');
+        showAnimation('extraTime', 'neutral', "90+");
         const extraIncidents = result.incidents.filter((incident) => incident.minute > 90);
         await playMinutes(91, 120, EXTRA_TIME_CHECKPOINTS, extraIncidents);
         if (cancelled) return;
@@ -188,11 +228,13 @@ export default function LiveMatchPanel({
           text: result.penalties ? 'Uzatma berabere bitti. Penaltılar başlıyor.' : 'Uzatma tamamlandı.',
           tone: 'neutral',
         });
+        showAnimation(result.penalties ? 'penaltyShootout' : 'fulltime', 'neutral', "120'");
         await wait();
       }
 
       if (result.penalties && result.penaltyKicks) {
         setPhase('penalties');
+        showAnimation('penaltyShootout', 'neutral', 'PEN');
         for (const kick of result.penaltyKicks) await revealPenalty(kick);
       }
 
@@ -205,6 +247,7 @@ export default function LiveMatchPanel({
         text: 'Maç sona erdi.',
         tone: 'neutral',
       });
+      showAnimation('fulltime', 'neutral', 'FT');
       completeRef.current();
     };
 
@@ -249,6 +292,8 @@ export default function LiveMatchPanel({
         </div>
       </div>
 
+      <MatchPitchAnimation state={animationState} homeName={homeName} awayName={awayName} />
+
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -274,8 +319,7 @@ export default function LiveMatchPanel({
             {entry.tone === 'goal' ? <Flag size={15} /> :
               entry.tone === 'warning' ? <ShieldAlert size={15} /> :
                 entry.tone === 'danger' ? <HeartPulse size={15} /> :
-                  entry.tone === 'change' ? <RefreshCw size={15} /> :
-                    <span className="h-2 w-2 bg-current" />}
+                  <span className="h-2 w-2 bg-current" />}
             <span>{entry.text}</span>
           </div>
         ))}

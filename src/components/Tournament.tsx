@@ -700,8 +700,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
                 {latestResult.incidents.filter((incident) => incident.type !== 'goal').map((incident, index) => (
                   <p key={`${incident.minute}-${incident.playerName}-${index}`} className="text-xs font-black">
                     {incident.minute}&apos; {
-                      incident.type === 'yellow-card' ? 'Sarı kart' :
-                        incident.type === 'red-card' ? 'Kırmızı kart' : 'Küçük sakatlık'
+                      incident.type === 'yellow-card' ? 'Sarı kart' : 'Küçük sakatlık'
                     }: {incident.playerName}
                   </p>
                 ))}

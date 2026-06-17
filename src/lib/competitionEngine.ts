@@ -26,7 +26,7 @@ export interface MatchIncident {
   minute: number;
   teamId: string;
   playerName: string;
-  type: 'goal' | 'yellow-card' | 'red-card' | 'injury';
+  type: 'goal' | 'yellow-card' | 'injury';
 }
 
 export interface PenaltyKick {
@@ -212,15 +212,6 @@ const buildIncidents = (
         teamId: team.id,
         playerName: player.name,
         type: 'yellow-card',
-      });
-    }
-    if (Math.random() < 0.07 * settings.chanceFactor) {
-      const player = randomPlayer(team);
-      if (player) incidents.push({
-        minute: 20 + Math.floor(Math.random() * 70),
-        teamId: team.id,
-        playerName: player.name,
-        type: 'red-card',
       });
     }
     if (Math.random() < settings.injuryChance * settings.chanceFactor) {
