@@ -17,6 +17,8 @@ import { decodeShareCode } from '@/lib/shareCode';
 import { saveTeamSnapshot } from '@/lib/localStats';
 import { getCompetitions } from '@/lib/seasonRepository';
 import { getTacticProfile } from '@/lib/teamManagement';
+import { loadCareer, getManagerLevel, type CareerSave } from '@/lib/careerMode';
+import { loadProfile, type ProfileStats } from '@/lib/profileService';
 
 export default function Home() {
   const selectedPlayers = useTeamStore((state) => state.selectedPlayers);
@@ -44,6 +46,8 @@ export default function Home() {
   const [pendingFormation, setPendingFormation] = useState<FormationType | null>(formationId);
   const [pendingMentality, setPendingMentality] = useState<MentalityType | null>(mentality);
   const [pendingBlindMode, setPendingBlindMode] = useState(blindMode);
+  const [careerResume, setCareerResume] = useState<CareerSave | null>(null);
+  const [profileStats, setProfileStats] = useState<ProfileStats | null>(null);
   const loadedShareRef = useRef(false);
   const savedDraftRef = useRef<string | null>(null);
   const captainPanelRef = useRef<HTMLDivElement | null>(null);
@@ -118,6 +122,16 @@ export default function Home() {
 
     return () => window.clearTimeout(timer);
   }, [hasCaptain, isTeamFull, setupComplete]);
+
+  useEffect(() => {
+    const loadResume = () => {
+      setCareerResume(loadCareer());
+      setProfileStats(loadProfile());
+    };
+    loadResume();
+    window.addEventListener('storage', loadResume);
+    return () => window.removeEventListener('storage', loadResume);
+  }, [gameMode]);
 
   if (gameMode === 'manager') {
     return (
@@ -284,6 +298,32 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {careerResume && (
+        <section className={`border-b-4 border-black px-4 py-4 ${isDark ? 'bg-yellow-400 text-black' : 'bg-yellow-300 text-black'}`}>
+          <div className="mx-auto grid max-w-7xl gap-3 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-65">Kariyerine devam et</p>
+              <h2 className="mt-1 text-xl font-black uppercase italic">
+                {careerResume.club.teamName} / Hafta {Math.min(careerResume.currentWeek + 1, 34)} seni bekliyor
+              </h2>
+              <p className="mt-1 text-xs font-black uppercase">
+                Yönetim güveni %{careerResume.boardConfidence} · Taraftar %{careerResume.fanHappiness}
+                {careerResume.transferMarket.length > 0 ? ' · Transfer dönemi açık' : ''}
+                {careerResume.offers.length > 0 ? ' · Yeni kulüp teklifi var' : ''}
+                {profileStats ? ` · ${getManagerLevel(profileStats.careerPoints)}` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGameMode('career')}
+              className="game-button border-4 border-black bg-green-600 px-5 py-4 text-sm font-black uppercase text-white shadow-[4px_4px_0px_0px_#000]"
+            >
+              Kariyere Devam Et
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className={`sticky top-0 z-40 border-b-2 border-black px-4 py-3 font-mono shadow-[0_4px_0px_0px_rgba(0,0,0,0.25)] lg:static lg:shadow-none ${isDark ? 'bg-zinc-950 text-white' : 'bg-yellow-50 text-black'}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

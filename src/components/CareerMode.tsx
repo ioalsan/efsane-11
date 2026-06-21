@@ -371,6 +371,53 @@ const buildShareText = (save: CareerSave, summary = save.seasonSummary) => {
   return `Canlı11'de ${summary.teamName} ile ligi ${summary.points} puanla ${summary.leaguePosition}. bitirdim. ${summary.wins} galibiyet, ${summary.draws} beraberlik, ${summary.losses} mağlubiyet ve ${summary.goalsFor} gol. Kariyer puanı +${summary.careerPointsGained}.`;
 };
 
+type ClipboardNavigator = Navigator & {
+  clipboard: {
+    writeText: (text: string) => Promise<void>;
+  };
+};
+
+type ShareNavigator = Navigator & {
+  share: (data: ShareData) => Promise<void>;
+};
+
+const hasClipboardWriter = (value: Navigator): value is ClipboardNavigator => (
+  'clipboard' in value
+  && typeof (value as ClipboardNavigator).clipboard?.writeText === 'function'
+);
+
+const hasNativeShare = (value: Navigator): value is ShareNavigator => (
+  'share' in value
+  && typeof (value as ShareNavigator).share === 'function'
+);
+
+const copyTextToClipboard = async (text: string) => {
+  if (typeof navigator !== 'undefined' && hasClipboardWriter(navigator)) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall back when clipboard permissions or browser policy block direct access.
+    }
+  }
+
+  if (typeof document === 'undefined') return false;
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+
+  try {
+    textarea.select();
+    return document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
+
 const finishSeason = (save: CareerSave, dataset: SeasonDataset): CareerSave => {
   const standings = calculateStandings(save.teamIds, save.fixtures.flat());
   const rowIndex = standings.findIndex((row) => row.teamId === save.club.teamId);
@@ -969,11 +1016,19 @@ function SeasonSummaryPanel({ save }: { save: CareerSave }) {
 function ShareButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const share = async () => {
-    if (typeof navigator !== 'undefined' && 'share' in navigator) {
-      await navigator.share({ title: 'Canlı11 Kariyer', text });
-      return;
+    if (typeof navigator === 'undefined') return;
+    const nav = navigator;
+    if (hasNativeShare(nav)) {
+      try {
+        await nav.share({ title: 'Canlı11 Kariyer', text });
+        return;
+      } catch {
+        // Continue with clipboard copy if native sharing is blocked or unavailable.
+      }
     }
-    await navigator.clipboard.writeText(text);
+    const didCopy = await copyTextToClipboard(text);
+    if (!didCopy) return;
+
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   };

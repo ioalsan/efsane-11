@@ -1,4 +1,4 @@
-import type { FootballPosition, Player, SeasonDataset, SeasonPlayer } from '@/types';
+import type { FootballPosition, SeasonDataset } from '@/types';
 
 export interface PlayerDataProfile {
   dateOfBirth?: string;
@@ -23,6 +23,18 @@ export interface PlayerDataQualityReport {
     marketValue: number;
     status: 'ok' | 'fixed' | 'invalid';
   }>;
+}
+
+interface PlayerDataInput {
+  id: string;
+  name: string;
+  rating?: number;
+  overall_rating?: number;
+  form?: number;
+  primaryPosition?: FootballPosition;
+  dateOfBirth?: string;
+  potential?: number;
+  marketValue?: number;
 }
 
 const VERIFIED_PLAYER_DATA: Record<string, { dateOfBirth: string; marketValue?: number; potential?: number }> = {
@@ -137,10 +149,10 @@ export const calculateRealisticMarketValue = ({
 };
 
 export const getPlayerDataProfile = (
-  player: Pick<Player | SeasonPlayer, 'id' | 'name' | 'rating' | 'overall_rating' | 'form' | 'primaryPosition' | 'dateOfBirth' | 'potential' | 'marketValue'>,
+  player: PlayerDataInput,
   referenceDate = new Date(),
 ): PlayerDataProfile => {
-  const rating = 'overall_rating' in player ? player.overall_rating : player.rating;
+  const rating = player.overall_rating ?? player.rating ?? 70;
   const form = player.form ?? 0;
   const verified = VERIFIED_PLAYER_DATA[normalizeName(player.name)];
   const dateOfBirth = player.dateOfBirth ?? verified?.dateOfBirth;

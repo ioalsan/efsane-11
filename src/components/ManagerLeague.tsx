@@ -54,6 +54,8 @@ import {
   type ManagerMentality,
 } from '@/lib/teamManagement';
 import { getCaptainRole } from '@/lib/captain';
+import { ensureLocalUser } from '@/lib/authService';
+import { upsertSaveGame } from '@/lib/saveGameService';
 import type { Player, SeasonDataset, SeasonTeam } from '@/types';
 import LiveMatchPanel from './LiveMatchPanel';
 
@@ -462,6 +464,12 @@ export default function ManagerLeague({ onBackToQuick }: { onBackToQuick: () => 
   const persist = (nextSave: ManagerLeagueSave) => {
     setSave(nextSave);
     saveManagerLeague(nextSave);
+    const user = ensureLocalUser(nextSave.user.username);
+    upsertSaveGame({
+      userId: user.id,
+      activeMode: 'manager',
+      managerLeagueSave: nextSave,
+    });
   };
 
   useEffect(() => {
