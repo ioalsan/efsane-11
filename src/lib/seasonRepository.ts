@@ -8,6 +8,7 @@ import type {
   SeasonTeam,
   Squad,
 } from '@/types';
+import { getPlayerDataProfile } from './playerDataQuality';
 
 export const DEFAULT_COMPETITION_ID = 'super-lig';
 export const SEASON_DATA_UPDATED_EVENT = 'efsane11:season-data-updated';
@@ -180,6 +181,7 @@ export const toLegacyPlayer = (player: SeasonPlayer): Player => {
     LEGACY_POSITION_MAP[player.primaryPosition],
     ...player.secondaryPositions.map((position) => LEGACY_POSITION_MAP[position]),
   ]));
+  const dataProfile = getPlayerDataProfile(player);
   return {
     id: player.id,
     name: player.name,
@@ -197,6 +199,10 @@ export const toLegacyPlayer = (player: SeasonPlayer): Player => {
     primaryPosition: player.primaryPosition,
     secondaryPositions: player.secondaryPositions,
     attributes: player.attributes,
+    dateOfBirth: dataProfile.dateOfBirth,
+    age: dataProfile.age,
+    potential: dataProfile.potential,
+    marketValue: dataProfile.marketValue,
   };
 };
 

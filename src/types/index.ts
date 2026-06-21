@@ -22,6 +22,10 @@ export interface Player {
   primaryPosition?: FootballPosition;
   secondaryPositions?: FootballPosition[];
   attributes?: PlayerAttributes;
+  dateOfBirth?: string;
+  age?: number;
+  potential?: number;
+  marketValue?: number;
 }
 
 export interface Squad {
@@ -79,6 +83,9 @@ export interface SeasonPlayer {
   isActive: boolean;
   attributes: PlayerAttributes;
   sourcePlayerId?: number;
+  dateOfBirth?: string;
+  potential?: number;
+  marketValue?: number;
 }
 
 export interface PlayerAttributes {

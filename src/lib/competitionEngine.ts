@@ -5,6 +5,7 @@ import type {
   PlayerAttributes,
   SeasonPlayer,
 } from '@/types';
+import { getTacticProfile, type ManagerMentality } from './teamManagement';
 
 export interface CompetitionTeam {
   id: string;
@@ -12,6 +13,15 @@ export interface CompetitionTeam {
   rating: number;
   players: CompetitionPlayer[];
   isUser?: boolean;
+  tactic?: ManagerMentality;
+  chemistry?: number;
+  captainImpact?: number;
+  captainRoleTitle?: string;
+}
+
+export interface MatchSimulationOptions {
+  allowSubstitutions?: boolean;
+  longSimulation?: boolean;
 }
 
 export interface CompetitionPlayer {
@@ -26,7 +36,8 @@ export interface MatchIncident {
   minute: number;
   teamId: string;
   playerName: string;
-  type: 'goal' | 'yellow-card' | 'injury';
+  relatedPlayerName?: string;
+  type: 'goal' | 'yellow-card' | 'injury' | 'substitution';
 }
 
 export interface PenaltyKick {
@@ -49,6 +60,12 @@ export interface MatchResult {
     possessionHome: number;
     shotsHome: number;
     shotsAway: number;
+    shotsOnTargetHome: number;
+    shotsOnTargetAway: number;
+    passesHome: number;
+    passesAway: number;
+    foulsHome: number;
+    foulsAway: number;
     xgHome: number;
     xgAway: number;
   };
@@ -113,6 +130,62 @@ const pickAttacker = (team: CompetitionTeam) => {
 };
 
 const randomPlayer = (team: CompetitionTeam) => team.players[Math.floor(Math.random() * team.players.length)];
+
+const buildSubstitutionIncidents = (team: CompetitionTeam): MatchIncident[] => {
+  const starters = team.players.slice(0, 11);
+  const bench = team.players.slice(11, 18);
+  if (starters.length < 11 || bench.length === 0) return [];
+
+  const substitutionCount = Math.min(5, bench.length, 2 + Math.floor(Math.random() * 4));
+  return Array.from({ length: substitutionCount }, (_, index) => {
+    const outgoing = starters[(index * 2 + Math.floor(Math.random() * starters.length)) % starters.length];
+    const incoming = bench[index % bench.length];
+    return {
+      minute: 55 + index * 7 + Math.floor(Math.random() * 5),
+      teamId: team.id,
+      playerName: incoming.name,
+      relatedPlayerName: outgoing.name,
+      type: 'substitution' as const,
+    };
+  });
+};
+
+const captainRoleEffect = (team: CompetitionTeam) => {
+  const impact = team.captainImpact ?? 0;
+  const role = team.captainRoleTitle ?? '';
+  return {
+    attack: role.includes('Bitirici') ? impact * 0.9 : role.includes('Maestro') ? impact * 0.45 : 0,
+    defense: role.includes('Duvar') || role.includes('Son Kale') ? impact * 0.8 : 0,
+    passing: role.includes('Maestro') ? impact * 0.9 : impact * 0.2,
+    composure: impact * 0.35,
+  };
+};
+
+const managerEffect = (team: CompetitionTeam) => {
+  const tactic = getTacticProfile(team.tactic);
+  const chemistryLift = ((team.chemistry ?? 70) - 70) / 10;
+  const captain = captainRoleEffect(team);
+
+  return {
+    attack: tactic.attackModifier + chemistryLift * 0.8 + captain.attack,
+    defense: tactic.defenseModifier + chemistryLift * 0.75 + captain.defense,
+    passing: tactic.possessionModifier + chemistryLift * 0.45 + captain.passing,
+    shotModifier: tactic.shotModifier + Math.max(0, chemistryLift) * 0.025 + captain.composure * 0.02,
+    foulModifier: tactic.foulModifier - Math.max(0, chemistryLift) * 0.035,
+    label: tactic.shortLabel,
+  };
+};
+
+const shotsOnTarget = (
+  shots: number,
+  goals: number,
+  shooting: number,
+  opponentGoalkeeping: number,
+  composure: number,
+) => {
+  const accuracy = clamp(0.34 + (shooting - opponentGoalkeeping) / 260 + composure / 90, 0.24, 0.62);
+  return Math.max(goals, Math.min(shots, Math.round(shots * accuracy)));
+};
 
 export const simulatePenaltyShootout = (
   home: CompetitionTeam,
@@ -184,6 +257,7 @@ const buildIncidents = (
   extraHomeGoals: number,
   extraAwayGoals: number,
   settings: GameSettings,
+  options: MatchSimulationOptions = {},
 ): MatchIncident[] => {
   const incidents: MatchIncident[] = [];
   const addGoals = (team: CompetitionTeam, count: number, firstMinute: number, lastMinute: number) => {
@@ -223,6 +297,9 @@ const buildIncidents = (
         type: 'injury',
       });
     }
+    if (options.allowSubstitutions) {
+      incidents.push(...buildSubstitutionIncidents(team));
+    }
   }
 
   return incidents.sort((a, b) => a.minute - b.minute);
@@ -233,7 +310,10 @@ export const simulateCompetitionMatch = (
   away: CompetitionTeam,
   knockout: boolean,
   settings: GameSettings,
+  options: MatchSimulationOptions = {},
 ): MatchResult => {
+  const homeManager = managerEffect(home);
+  const awayManager = managerEffect(away);
   const homeAttack = average([
     teamMetric(home, 'attack'),
     teamMetric(home, 'passing'),
@@ -250,9 +330,17 @@ export const simulateCompetitionMatch = (
   ], away.rating);
   const homeResistance = average([teamMetric(home, 'defense'), teamMetric(home, 'goalkeeping')], home.rating);
   const awayResistance = average([teamMetric(away, 'defense'), teamMetric(away, 'goalkeeping')], away.rating);
+  const homeShooting = teamMetric(home, 'shooting') + homeManager.attack * 0.45;
+  const awayShooting = teamMetric(away, 'shooting') + awayManager.attack * 0.45;
+  const homeGoalkeeping = teamMetric(home, 'goalkeeping') + homeManager.defense * 0.3;
+  const awayGoalkeeping = teamMetric(away, 'goalkeeping') + awayManager.defense * 0.3;
+  const homeAttackScore = homeAttack + homeManager.attack;
+  const awayAttackScore = awayAttack + awayManager.attack;
+  const homeResistanceScore = homeResistance + homeManager.defense;
+  const awayResistanceScore = awayResistance + awayManager.defense;
   const chanceFactor = clamp(settings.chanceFactor, 0.2, 2);
-  const homeXg = clamp((1.35 + (homeAttack - awayResistance) / 19 + 0.16) * chanceFactor, 0.15, 4.2);
-  const awayXg = clamp((1.2 + (awayAttack - homeResistance) / 19) * chanceFactor, 0.15, 4.2);
+  const homeXg = clamp((1.35 + (homeAttackScore - awayResistanceScore) / 19 + 0.16) * chanceFactor, 0.15, 4.6);
+  const awayXg = clamp((1.2 + (awayAttackScore - homeResistanceScore) / 19) * chanceFactor, 0.15, 4.6);
   let homeGoals = samplePoisson(homeXg);
   let awayGoals = samplePoisson(awayXg);
   const normalTime = { home: homeGoals, away: awayGoals };
@@ -279,7 +367,37 @@ export const simulateCompetitionMatch = (
     }
   }
 
-  const possessionHome = Math.round(clamp(50 + (teamMetric(home, 'passing') - teamMetric(away, 'passing')) * 0.45, 28, 72));
+  const homePassing = teamMetric(home, 'passing') + homeManager.passing;
+  const awayPassing = teamMetric(away, 'passing') + awayManager.passing;
+  const possessionHome = Math.round(clamp(50 + (homePassing - awayPassing) * 0.48, 24, 76));
+  const possessionAway = 100 - possessionHome;
+  const shotsHome = Math.max(
+    homeGoals,
+    Math.round((homeXg * 4.1 + Math.random() * 5) * homeManager.shotModifier),
+  );
+  const shotsAway = Math.max(
+    awayGoals,
+    Math.round((awayXg * 4.1 + Math.random() * 5) * awayManager.shotModifier),
+  );
+  const shotsOnTargetHome = shotsOnTarget(
+    shotsHome,
+    homeGoals,
+    homeShooting,
+    awayGoalkeeping,
+    home.captainImpact ?? 0,
+  );
+  const shotsOnTargetAway = shotsOnTarget(
+    shotsAway,
+    awayGoals,
+    awayShooting,
+    homeGoalkeeping,
+    away.captainImpact ?? 0,
+  );
+  const passesHome = Math.round(clamp(170 + possessionHome * 4.8 + homePassing * 2.2 + Math.random() * 45, 180, 720));
+  const passesAway = Math.round(clamp(170 + possessionAway * 4.8 + awayPassing * 2.2 + Math.random() * 45, 180, 720));
+  const foulsHome = Math.round(clamp((8 + Math.random() * 7 + (50 - possessionHome) * 0.04) * homeManager.foulModifier, 3, 24));
+  const foulsAway = Math.round(clamp((8 + Math.random() * 7 + (50 - possessionAway) * 0.04) * awayManager.foulModifier, 3, 24));
+
   return {
     normalTime,
     extraTime,
@@ -294,11 +412,18 @@ export const simulateCompetitionMatch = (
       extraHomeGoals,
       extraAwayGoals,
       settings,
+      options,
     ),
     stats: {
       possessionHome,
-      shotsHome: Math.max(homeGoals, Math.round(homeXg * 4 + Math.random() * 5)),
-      shotsAway: Math.max(awayGoals, Math.round(awayXg * 4 + Math.random() * 5)),
+      shotsHome,
+      shotsAway,
+      shotsOnTargetHome,
+      shotsOnTargetAway,
+      passesHome,
+      passesAway,
+      foulsHome,
+      foulsAway,
       xgHome: Math.round(homeXg * 100) / 100,
       xgAway: Math.round(awayXg * 100) / 100,
     },

@@ -58,7 +58,19 @@ test('keeps league draws and awards one point', () => {
     normalTime: { home: 1, away: 1 },
     winnerId: null,
     incidents: [],
-    stats: { possessionHome: 50, shotsHome: 5, shotsAway: 5, xgHome: 1, xgAway: 1 },
+    stats: {
+      possessionHome: 50,
+      shotsHome: 5,
+      shotsAway: 5,
+      shotsOnTargetHome: 2,
+      shotsOnTargetAway: 2,
+      passesHome: 420,
+      passesAway: 420,
+      foulsHome: 8,
+      foulsAway: 8,
+      xgHome: 1,
+      xgAway: 1,
+    },
   };
   const table = calculateStandings(['home', 'away'], fixtures);
   assert.deepEqual(table.map((row) => row.points), [1, 1]);
@@ -136,6 +148,53 @@ test('knockout simulation exposes timed events and individual penalties', () => 
       assert.ok(result.penaltyKicks && result.penaltyKicks.length >= 10);
       assert.notEqual(result.penalties.home, result.penalties.away);
     }
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('manager league simulation can produce substitutions without enabling them in quick mode', () => {
+  const attributes = {
+    attack: 80,
+    defense: 80,
+    passing: 80,
+    pace: 80,
+    shooting: 80,
+    dribbling: 80,
+    goalkeeping: 80,
+  };
+  const createTeam = (id: string): CompetitionTeam => ({
+    id,
+    name: id,
+    rating: 80,
+    players: Array.from({ length: 18 }, (_, index) => ({
+      id: `${id}-${index}`,
+      name: `${id} Player ${index + 1}`,
+      rating: 80,
+      form: 0,
+      attributes,
+    })),
+  });
+  const settings = {
+    adsEnabled: false,
+    chanceFactor: 1,
+    penaltiesEnabled: true,
+    injuryChance: 0,
+    simulateOtherMatches: true,
+  };
+  const originalRandom = Math.random;
+  Math.random = () => 0.5;
+  try {
+    const quickResult = simulateCompetitionMatch(createTeam('home'), createTeam('away'), false, settings);
+    const managerResult = simulateCompetitionMatch(
+      createTeam('home'),
+      createTeam('away'),
+      false,
+      settings,
+      { allowSubstitutions: true, longSimulation: true },
+    );
+    assert.ok(!quickResult.incidents.some((incident) => incident.type === 'substitution'));
+    assert.ok(managerResult.incidents.some((incident) => incident.type === 'substitution'));
   } finally {
     Math.random = originalRandom;
   }

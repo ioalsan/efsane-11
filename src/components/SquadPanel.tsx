@@ -4,6 +4,7 @@ import { Crown, PencilLine, X } from 'lucide-react';
 import { FORMATIONS } from '@/lib/formations';
 import { useTeamStore } from '@/store/useTeamStore';
 import { getCaptainRole } from '@/lib/captain';
+import { getSquadManagementSummary, getTacticProfile } from '@/lib/teamManagement';
 import LeaderboardPanel from './LeaderboardPanel';
 import AdSlot from './AdSlot';
 
@@ -16,6 +17,7 @@ export default function SquadPanel() {
   const removePlayer = useTeamStore((state) => state.removePlayer);
   const setActivePlayerToPlace = useTeamStore((state) => state.setActivePlayerToPlace);
   const captainId = useTeamStore((state) => state.captainId);
+  const mentality = useTeamStore((state) => state.mentality);
   const setCaptain = useTeamStore((state) => state.setCaptain);
   const squadName = useTeamStore((state) => state.squadName);
   const setSquadName = useTeamStore((state) => state.setSquadName);
@@ -26,6 +28,13 @@ export default function SquadPanel() {
   const showRating = !blindMode || totalSelected === 11;
   const captain = selectedPlayers.find((player) => player?.id === captainId) ?? null;
   const captainRole = getCaptainRole(captain);
+  const managementSummary = getSquadManagementSummary({
+    selectedPlayers,
+    formationId,
+    captainId,
+    mentality,
+  });
+  const tacticProfile = getTacticProfile(mentality);
 
   return (
     <aside className={`w-full lg:w-80 xl:w-96 flex flex-col h-full border-l-2 border-black transition-colors duration-300 ${isDark ? 'bg-zinc-950/80' : 'bg-zinc-50'}`}>
@@ -75,6 +84,29 @@ export default function SquadPanel() {
             placeholder="Efsane 11"
           />
         </label>
+
+        <div className="grid grid-cols-2 gap-3">
+          <MiniGauge label="Kadro Gücü" value={managementSummary.power} tone="yellow" />
+          <MiniGauge label="Kimya" value={managementSummary.chemistry} tone="green" />
+        </div>
+
+        <div className={`border-2 border-black p-3 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-yellow-500">Teknik Plan</p>
+              <p className="mt-1 text-sm font-black uppercase">{tacticProfile.label}</p>
+            </div>
+            <span className="border border-black bg-yellow-400 px-2 py-1 text-[9px] font-black uppercase text-black">
+              {managementSummary.chemistryLabel}
+            </span>
+          </div>
+          <p className="mt-2 text-[10px] font-bold leading-relaxed opacity-60">{managementSummary.tacticalAdvice}</p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+          <SquadAnalysis title="Güçlü" items={managementSummary.strengths} tone="green" />
+          <SquadAnalysis title="Gelişecek" items={managementSummary.weaknesses} tone="red" />
+        </div>
       </div>
 
       <div className="px-6 py-4 border-b border-black/10 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.2em] opacity-60">
@@ -157,5 +189,49 @@ export default function SquadPanel() {
       <LeaderboardPanel />
       <AdSlot placement="right-panel" className="hidden shrink-0 lg:block" />
     </aside>
+  );
+}
+
+function MiniGauge({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'yellow' | 'green';
+}) {
+  const fillClass = tone === 'green' ? 'bg-green-500' : 'bg-yellow-400';
+  return (
+    <div className="border-2 border-black bg-black p-3 text-white">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/50">{label}</span>
+        <span className="text-lg font-black">{value}</span>
+      </div>
+      <div className="h-2 overflow-hidden border border-white/15 bg-white/10">
+        <div className={`h-full ${fillClass}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SquadAnalysis({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: 'green' | 'red';
+}) {
+  return (
+    <div className={`border-2 border-black p-3 ${tone === 'green' ? 'bg-green-500/15' : 'bg-red-500/15'}`}>
+      <p className={`text-[9px] font-black uppercase tracking-[0.16em] ${tone === 'green' ? 'text-green-500' : 'text-red-500'}`}>{title}</p>
+      <div className="mt-2 space-y-1">
+        {items.map((item) => (
+          <p key={item} className="text-[10px] font-black uppercase opacity-70">{item}</p>
+        ))}
+      </div>
+    </div>
   );
 }

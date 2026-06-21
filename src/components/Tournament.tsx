@@ -25,6 +25,14 @@ import {
   subscribeSeasonDataset,
 } from '@/lib/seasonRepository';
 import { saveTeamSnapshot } from '@/lib/localStats';
+import { getCaptainRole } from '@/lib/captain';
+import { type FormationType } from '@/lib/formations';
+import {
+  getSquadManagementSummary,
+  getTacticProfile,
+  type ManagerMentality,
+  type SquadManagementSummary,
+} from '@/lib/teamManagement';
 import type { CompetitionGroup, KnockoutRound, SeasonCompetition, SeasonTeam } from '@/types';
 import AdSlot from './AdSlot';
 import LiveMatchPanel from './LiveMatchPanel';
@@ -84,12 +92,29 @@ const createCompetitionTeams = (
   userName: string,
   userPlayers: ReturnType<typeof useTeamStore.getState>['selectedPlayers'],
   dataset: ReturnType<typeof getSeasonDataset>,
+  managerContext: {
+    formationId: FormationType | null;
+    mentality: ManagerMentality | null;
+    captainId: string | null;
+  },
 ): CompetitionTeam[] => {
+  const captain = userPlayers.find((player) => player?.id === managerContext.captainId) ?? null;
+  const captainRole = getCaptainRole(captain);
+  const managementSummary = getSquadManagementSummary({
+    selectedPlayers: userPlayers,
+    formationId: managerContext.formationId,
+    captainId: managerContext.captainId,
+    mentality: managerContext.mentality,
+  });
   const userTeam: CompetitionTeam = {
     id: USER_TEAM_ID,
     name: userName || 'Efsane 11',
     rating: userRating,
     isUser: true,
+    tactic: managerContext.mentality ?? 'Balanced',
+    chemistry: managementSummary.chemistry,
+    captainImpact: captainRole ? captainRole.bonus * 2 : 0,
+    captainRoleTitle: captainRole?.title,
     players: userPlayers
       .filter((player) => player !== null)
       .map(toCompetitionPlayer),
@@ -131,6 +156,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
   const theme = useTeamStore((state) => state.theme);
   const competitionId = useTeamStore((state) => state.competitionId);
   const formationId = useTeamStore((state) => state.formation);
+  const mentality = useTeamStore((state) => state.mentality);
   const captainId = useTeamStore((state) => state.captainId);
   const squadName = useTeamStore((state) => state.squadName);
   const userPlayers = useTeamStore((state) => state.selectedPlayers);
@@ -143,10 +169,21 @@ export default function Tournament({ userRating }: { userRating: number }) {
 
   const teams = useMemo(
     () => competition
-      ? createCompetitionTeams(sourceTeams, userRating, squadName, userPlayers, dataset)
+      ? createCompetitionTeams(sourceTeams, userRating, squadName, userPlayers, dataset, {
+        formationId,
+        mentality,
+        captainId,
+      })
       : [],
-    [competition, dataset, sourceTeams, squadName, userPlayers, userRating],
+    [captainId, competition, dataset, formationId, mentality, sourceTeams, squadName, userPlayers, userRating],
   );
+  const managerSummary = useMemo(() => getSquadManagementSummary({
+    selectedPlayers: userPlayers,
+    formationId,
+    captainId,
+    mentality,
+  }), [captainId, formationId, mentality, userPlayers]);
+  const tacticProfile = getTacticProfile(mentality);
   const teamMap = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
   const teamIds = useMemo(() => teams.map((team) => team.id), [teams]);
   const worldCupGroups = useMemo(
@@ -502,12 +539,26 @@ export default function Tournament({ userRating }: { userRating: number }) {
             <p className="mt-1 text-xs font-black uppercase text-yellow-500">{currentStageLabel}</p>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-3 lg:grid-cols-6">
           <Stat label="Takım" value={teams.length} />
-          <Stat label="Rating" value={userRating} />
+          <Stat label="Kadro Gücü" value={managerSummary.power} />
+          <Stat label="Kimya" value={`${managerSummary.chemistry}`} />
+          <Stat label="Taktik" value={tacticProfile.shortLabel} />
+          <Stat label="Kaptan" value={managerSummary.captainImpact ? `+${managerSummary.captainImpact}` : '-'} />
           <Stat label="Format" value={formatLabel(competition)} />
         </div>
       </header>
+
+      <section className={`mt-5 grid gap-3 border-2 border-black p-4 shadow-[4px_4px_0px_0px_#000] lg:grid-cols-[1.1fr_1fr_1fr] ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+        <ManagerGauge label="Kadro Gücü" value={managerSummary.power} tone="yellow" />
+        <ManagerGauge label={`Takım Kimyası / ${managerSummary.chemistryLabel}`} value={managerSummary.chemistry} tone="green" />
+        <div className="border-2 border-black bg-black p-3 text-white">
+          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-yellow-400">Maç Planı</p>
+          <p className="mt-1 text-lg font-black uppercase">{tacticProfile.label}</p>
+          <p className="mt-1 text-[10px] font-bold leading-relaxed text-white/60">{tacticProfile.description}</p>
+          <p className="mt-2 text-[9px] font-black uppercase tracking-[0.14em] text-white/45">{tacticProfile.riskLabel}</p>
+        </div>
+      </section>
 
       <section className={`mt-5 flex flex-col gap-3 border-2 border-black p-4 shadow-[4px_4px_0px_0px_#000] sm:flex-row sm:items-center sm:justify-between ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
         <div>
@@ -590,31 +641,13 @@ export default function Tournament({ userRating }: { userRating: number }) {
       )}
 
       {!liveFixture && latestResult && latestFixture && (
-        <section className="mt-7 border-4 border-black bg-zinc-900 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-yellow-500">Final Sonucu</p>
-          <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-            <p className="text-right text-xl font-black uppercase">{latestHome}</p>
-            <p className="whitespace-nowrap text-4xl font-black">
-              {(latestResult.extraTime ?? latestResult.normalTime).home} - {(latestResult.extraTime ?? latestResult.normalTime).away}
-            </p>
-            <p className="text-left text-xl font-black uppercase">{latestAway}</p>
-          </div>
-          {latestResult.extraTime && (
-            <p className="mt-3 text-center text-sm font-black text-yellow-400">
-              90 Dakika: {latestResult.normalTime.home} - {latestResult.normalTime.away}
-            </p>
-          )}
-          {latestResult.penalties && (
-            <p className="mt-2 text-center text-sm font-black text-red-400">
-              Penaltılar: {latestResult.penalties.home} - {latestResult.penalties.away}
-            </p>
-          )}
-          {latestFixture.stage !== 'league' && latestFixture.stage !== 'group' && latestResult.winnerId && (
-            <p className="mt-3 text-center text-xs font-black uppercase tracking-[0.18em]">
-              {teamName(latestResult.winnerId)} tur atladı
-            </p>
-          )}
-        </section>
+        <MatchReportCard
+          fixture={latestFixture}
+          homeName={latestHome}
+          awayName={latestAway}
+          managerSummary={managerSummary}
+          teamName={teamName}
+        />
       )}
 
       <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -707,9 +740,11 @@ export default function Tournament({ userRating }: { userRating: number }) {
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3 border-t border-white/15 pt-4 text-center">
                 <Stat label="Topa Sahip Olma" value={`%${latestResult.stats.possessionHome}`} />
+                <Stat label="Şut" value={`${latestResult.stats.shotsHome} / ${latestResult.stats.shotsAway}`} />
+                <Stat label="İsabet" value={`${latestResult.stats.shotsOnTargetHome} / ${latestResult.stats.shotsOnTargetAway}`} />
+                <Stat label="Pas" value={`${latestResult.stats.passesHome} / ${latestResult.stats.passesAway}`} />
+                <Stat label="Faul" value={`${latestResult.stats.foulsHome} / ${latestResult.stats.foulsAway}`} />
                 <Stat label="xG" value={`${latestResult.stats.xgHome} / ${latestResult.stats.xgAway}`} />
-                <Stat label="Şut" value={latestResult.stats.shotsHome} />
-                <Stat label="Rakip Şut" value={latestResult.stats.shotsAway} />
               </div>
             </section>
           )}
@@ -816,6 +851,155 @@ function PlayedMatchesPanel({
         })}
       </div>
     </section>
+  );
+}
+
+function ManagerGauge({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'yellow' | 'green';
+}) {
+  const fillClass = tone === 'green' ? 'bg-green-500' : 'bg-yellow-400';
+  return (
+    <div className="border-2 border-black bg-black p-3 text-white">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/55">{label}</p>
+        <p className="text-2xl font-black tabular-nums">{value}</p>
+      </div>
+      <div className="h-3 overflow-hidden border border-white/20 bg-white/10">
+        <div className={`h-full ${fillClass} transition-[width] duration-500`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function MatchReportCard({
+  fixture,
+  homeName,
+  awayName,
+  managerSummary,
+  teamName,
+}: {
+  fixture: CompetitionFixture;
+  homeName: string;
+  awayName: string;
+  managerSummary: SquadManagementSummary;
+  teamName: (teamId: string) => string;
+}) {
+  const result = fixture.result;
+  const score = finalScore(fixture);
+  if (!result || !score) return null;
+
+  const userIsHome = fixture.homeTeamId === USER_TEAM_ID;
+  const userScore = userIsHome ? score.home : score.away;
+  const opponentScore = userIsHome ? score.away : score.home;
+  const userWon = userScore > opponentScore || result.winnerId === USER_TEAM_ID;
+  const userLost = userScore < opponentScore || Boolean(result.winnerId && result.winnerId !== USER_TEAM_ID);
+  const outcomeLabel = userWon ? 'Plan tuttu' : userLost ? 'Plan revizyon istiyor' : 'Denge oyunu';
+  const outcomeClass = userWon ? 'bg-green-600' : userLost ? 'bg-red-600' : 'bg-yellow-500 text-black';
+  const userPossession = userIsHome ? result.stats.possessionHome : 100 - result.stats.possessionHome;
+  const userShots = userIsHome ? result.stats.shotsHome : result.stats.shotsAway;
+  const opponentShots = userIsHome ? result.stats.shotsAway : result.stats.shotsHome;
+  const tacticalNote = userWon
+    ? `Kadro gücü ${managerSummary.power} ve kimya ${managerSummary.chemistry} maç planını taşıdı.`
+    : userShots < opponentShots
+      ? 'Rakip daha fazla şut üretti; orta saha ve geçiş savunması güçlendirilmeli.'
+      : 'Üretim var, final aksiyon kalitesi ve bitiricilik daha belirleyici olmalı.';
+
+  const statRows = [
+    { label: 'Topa sahip olma', home: `%${result.stats.possessionHome}`, away: `%${100 - result.stats.possessionHome}` },
+    { label: 'Şut', home: result.stats.shotsHome, away: result.stats.shotsAway },
+    { label: 'İsabetli şut', home: result.stats.shotsOnTargetHome, away: result.stats.shotsOnTargetAway },
+    { label: 'Pas', home: result.stats.passesHome, away: result.stats.passesAway },
+    { label: 'Faul', home: result.stats.foulsHome, away: result.stats.foulsAway },
+    { label: 'xG', home: result.stats.xgHome, away: result.stats.xgAway },
+  ];
+
+  return (
+    <section className="mt-7 overflow-hidden border-4 border-black bg-zinc-950 text-white shadow-[6px_6px_0px_0px_#000]">
+      <div className={`px-5 py-4 ${outcomeClass}`}>
+        <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-75">Maç Sonu Teknik Rapor</p>
+        <h3 className="mt-1 text-2xl font-black uppercase italic tracking-tighter">{outcomeLabel}</h3>
+      </div>
+      <div className="p-5">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 border-b border-white/15 pb-5">
+          <p className="text-right text-base font-black uppercase sm:text-xl">{homeName}</p>
+          <div className="text-center">
+            <p className="whitespace-nowrap text-5xl font-black tabular-nums">{score.home} - {score.away}</p>
+            {result.extraTime && (
+              <p className="mt-2 text-[10px] font-black uppercase tracking-[0.15em] text-yellow-300">
+                90 dk: {result.normalTime.home} - {result.normalTime.away}
+              </p>
+            )}
+            {result.penalties && (
+              <p className="mt-1 text-[10px] font-black uppercase tracking-[0.15em] text-purple-300">
+                Penaltılar: {result.penalties.home} - {result.penalties.away}
+              </p>
+            )}
+          </div>
+          <p className="text-left text-base font-black uppercase sm:text-xl">{awayName}</p>
+        </div>
+
+        {fixture.stage !== 'league' && fixture.stage !== 'group' && result.winnerId && (
+          <p className="mt-4 border-2 border-white/15 bg-white/5 px-4 py-3 text-center text-xs font-black uppercase tracking-[0.18em]">
+            {teamName(result.winnerId)} tur atladı
+          </p>
+        )}
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.85fr]">
+          <div className="border-2 border-white/15 bg-white/5 p-4">
+            <h4 className="mb-3 text-sm font-black uppercase text-yellow-400">Maç İstatistikleri</h4>
+            <div className="space-y-2">
+              {statRows.map((row) => (
+                <div key={row.label} className="grid grid-cols-[4.5rem_1fr_4.5rem] items-center gap-3 text-xs font-black">
+                  <span className="text-right tabular-nums">{row.home}</span>
+                  <span className="border-x border-white/10 px-2 text-center text-[10px] uppercase tracking-[0.14em] text-white/55">{row.label}</span>
+                  <span className="tabular-nums">{row.away}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="border-2 border-white/15 bg-white/5 p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-yellow-400">Teknik Direktör Notu</p>
+              <p className="mt-2 text-sm font-bold leading-relaxed text-white/75">{tacticalNote}</p>
+              <p className="mt-3 text-[10px] font-black uppercase tracking-[0.14em] text-white/45">
+                Topla oynama: %{userPossession} / Şut dengesi: {userShots}-{opponentShots}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <AnalysisList title="Güçlü Yön" items={managerSummary.strengths} tone="green" />
+              <AnalysisList title="Zayıf Yön" items={managerSummary.weaknesses} tone="red" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AnalysisList({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: 'green' | 'red';
+}) {
+  return (
+    <div className={`border-2 border-white/15 p-3 ${tone === 'green' ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+      <p className={`text-[10px] font-black uppercase tracking-[0.16em] ${tone === 'green' ? 'text-green-300' : 'text-red-300'}`}>{title}</p>
+      <div className="mt-2 space-y-1">
+        {items.map((item) => (
+          <p key={item} className="text-[11px] font-black uppercase text-white/70">{item}</p>
+        ))}
+      </div>
+    </div>
   );
 }
 
