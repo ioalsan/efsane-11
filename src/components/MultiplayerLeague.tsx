@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Copy,
+  Crown,
   Eye,
   Link2,
   LogIn,
@@ -12,6 +13,7 @@ import {
   Save,
   ShieldCheck,
   Trophy,
+  Trash2,
   UserRound,
   Users,
 } from 'lucide-react';
@@ -19,19 +21,25 @@ import LiveMatchPanel from './LiveMatchPanel';
 import { useTeamStore } from '@/store/useTeamStore';
 import {
   createLeague,
+  createLocalFriendLeague,
   getLeagueHighlights,
   getPowerLimitCap,
+  getRealTeamReplacementPlan,
   getTeamDisplayName,
   joinLeague,
   listLeagues,
+  savePlayerSlotToLeague,
   saveTeamToLeague,
   simulateWeek,
+  startLocalFriendLeague,
   startLeague,
   buildMultiplayerTeamInput,
   type MultiplayerLeague as MultiplayerLeagueSave,
   type MultiplayerMaxUsers,
   type MultiplayerPowerLimit,
   type MultiplayerStandingRow,
+  type PlayerSlot,
+  type PlayerSlotTeamInput,
 } from '@/lib/multiplayerService';
 import {
   getCompetitionTeams,
@@ -44,11 +52,15 @@ import {
   saveCurrentUser,
   type LocalAuthUser,
 } from '@/lib/authService';
+import { FORMATIONS, type FormationType } from '@/lib/formations';
+import type { ManagerMentality } from '@/lib/teamManagement';
 import type { CompetitionFixture } from '@/lib/competitionEngine';
 import type { Player } from '@/types';
 
 const maxUserOptions: MultiplayerMaxUsers[] = [4, 8, 12, 18];
+const friendCountOptions = [2, 3, 4, 5];
 const powerLimitOptions: MultiplayerPowerLimit[] = ['balanced', 'max80', 'max85', 'free'];
+const tacticOptions: ManagerMentality[] = ['Gegenpress', 'Balanced', 'ParkTheBus'];
 
 const powerLimitLabels: Record<MultiplayerPowerLimit, string> = {
   balanced: 'Dengeli',
@@ -69,6 +81,31 @@ interface Notice {
   tone: NoticeTone;
   text: string;
 }
+
+type RosterTarget = 'startingXI' | 'substitutes' | 'reserves';
+
+interface SlotDraft {
+  displayName: string;
+  teamName: string;
+  formation: FormationType;
+  tactic: ManagerMentality;
+  captainId: string | null;
+  startingXI: string[];
+  substitutes: string[];
+  reserves: string[];
+}
+
+const rosterTargetLabels: Record<RosterTarget, string> = {
+  startingXI: 'İlk 11',
+  substitutes: 'Yedek',
+  reserves: 'Rezerv',
+};
+
+const rosterTargetLimits: Record<RosterTarget, number> = {
+  startingXI: 11,
+  substitutes: 7,
+  reserves: 5,
+};
 
 type ClipboardNavigator = Navigator & {
   clipboard: {
@@ -121,6 +158,27 @@ const getErrorMessage = (error: unknown) => (
   error instanceof Error ? error.message : 'İşlem tamamlanamadı.'
 );
 
+const createDraftFromSlot = (slot: PlayerSlot): SlotDraft => ({
+  displayName: slot.displayName,
+  teamName: slot.teamName,
+  formation: slot.formation ?? '4-2-3-1',
+  tactic: slot.tactic ?? 'Balanced',
+  captainId: slot.captainId,
+  startingXI: slot.selectedSquad?.startingXI ?? [],
+  substitutes: slot.selectedSquad?.substitutes ?? [],
+  reserves: slot.selectedSquad?.reserves ?? [],
+});
+
+const draftPlayerIds = (draft: SlotDraft) => [
+  ...draft.startingXI,
+  ...draft.substitutes,
+  ...draft.reserves,
+];
+
+const getDraftPlayers = (ids: string[], playerById: Map<string, Player>) => (
+  ids.map((id) => playerById.get(id)).filter((player): player is Player => Boolean(player))
+);
+
 export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: () => void }) {
   const dataset = useMemo(() => getSeasonDataset(), []);
   const selectedPlayers = useTeamStore((state) => state.selectedPlayers);
@@ -136,10 +194,15 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
   const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
   const [leagueName, setLeagueName] = useState('Hafta Sonu Ligi');
   const [maxUsers, setMaxUsers] = useState<MultiplayerMaxUsers>(8);
+  const [friendCount, setFriendCount] = useState(3);
   const [powerLimit, setPowerLimit] = useState<MultiplayerPowerLimit>('balanced');
   const [inviteCode, setInviteCode] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [liveFixture, setLiveFixture] = useState<CompetitionFixture | null>(null);
+  const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
+  const [slotDrafts, setSlotDrafts] = useState<Record<string, SlotDraft>>({});
+  const [playerQuery, setPlayerQuery] = useState('');
+  const [userMatchQueue, setUserMatchQueue] = useState<CompetitionFixture[]>([]);
 
   const refreshLeagues = (selectedId = activeLeagueId) => {
     const nextLeagues = listLeagues();
@@ -168,6 +231,16 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
     () => leagues.find((league) => league.id === activeLeagueId) ?? leagues[0] ?? null,
     [activeLeagueId, leagues],
   );
+  const isLocalFriendLeague = activeLeague?.mode === 'local-friends';
+  const playerSlots = useMemo(() => activeLeague?.playerSlots ?? [], [activeLeague]);
+  const activeSlot = useMemo(() => {
+    if (!isLocalFriendLeague) return null;
+    return playerSlots.find((slot) => slot.id === activeSlotId)
+      ?? playerSlots.find((slot) => !slot.ready)
+      ?? playerSlots[0]
+      ?? null;
+  }, [activeSlotId, isLocalFriendLeague, playerSlots]);
+  const activeDraft = activeSlot ? slotDrafts[activeSlot.id] ?? createDraftFromSlot(activeSlot) : null;
   const allLeagueTeams = useMemo(
     () => activeLeague ? [...activeLeague.teams, ...activeLeague.botTeams] : [],
     [activeLeague],
@@ -184,7 +257,27 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
     : null;
   const highlights = activeLeague ? getLeagueHighlights(activeLeague) : null;
   const seasonWeekCount = activeLeague?.fixtures.length ?? 0;
-  const botSlots = activeLeague ? Math.max(0, activeLeague.maxUsers - activeLeague.teams.length) : 0;
+  const botSlots = activeLeague
+    ? Math.max(0, activeLeague.maxUsers - (isLocalFriendLeague ? playerSlots.length : activeLeague.teams.length))
+    : 0;
+  const humanTeamIds = useMemo(
+    () => activeLeague?.teams.map((team) => team.id) ?? [],
+    [activeLeague?.teams],
+  );
+  const realTeamPlan = useMemo(() => (
+    getRealTeamReplacementPlan(isLocalFriendLeague ? playerSlots.length : activeLeague?.teams.length ?? 0, dataset)
+  ), [activeLeague?.teams.length, dataset, isLocalFriendLeague, playerSlots.length]);
+  const includedRealTeams = activeLeague?.realTeams?.length ? activeLeague.realTeams : realTeamPlan.realTeams;
+  const replacedRealTeams = activeLeague?.replacedTeams?.length ? activeLeague.replacedTeams : realTeamPlan.replacedTeams;
+
+  const allPlayers = useMemo(
+    () => dataset.players.map(toLegacyPlayer).sort((a, b) => playerScore(b) - playerScore(a)),
+    [dataset],
+  );
+  const playerById = useMemo(
+    () => new Map(allPlayers.map((player) => [player.id, player] as const)),
+    [allPlayers],
+  );
 
   const startingPlayers = useMemo(
     () => selectedPlayers.filter((player): player is Player => Boolean(player)),
@@ -215,6 +308,54 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
   }, [captainId, formation, squadName, startingPlayers, substitutePlayers, tactic, user]);
   const powerCap = activeLeague ? getPowerLimitCap(activeLeague.powerLimit) : null;
   const exceedsPowerLimit = Boolean(teamPreview && powerCap && teamPreview.rating > powerCap);
+  const activeDraftSelectedIds = useMemo(
+    () => new Set(activeDraft ? draftPlayerIds(activeDraft) : []),
+    [activeDraft],
+  );
+  const activeDraftStartingPlayers = useMemo(
+    () => activeDraft ? getDraftPlayers(activeDraft.startingXI, playerById) : [],
+    [activeDraft, playerById],
+  );
+  const activeDraftSubstitutes = useMemo(
+    () => activeDraft ? getDraftPlayers(activeDraft.substitutes, playerById) : [],
+    [activeDraft, playerById],
+  );
+  const activeDraftReserves = useMemo(
+    () => activeDraft ? getDraftPlayers(activeDraft.reserves, playerById) : [],
+    [activeDraft, playerById],
+  );
+  const activeSlotPreview = useMemo(() => {
+    if (!activeSlot || !activeDraft || activeDraftStartingPlayers.length !== 11) return null;
+    return buildMultiplayerTeamInput({
+      ownerId: activeSlot.id,
+      teamName: activeDraft.teamName,
+      formation: activeDraft.formation,
+      tactic: activeDraft.tactic,
+      captainId: activeDraft.captainId,
+      startingPlayers: activeDraftStartingPlayers,
+      substitutes: activeDraftSubstitutes,
+      reserves: activeDraftReserves,
+    });
+  }, [activeDraft, activeDraftReserves, activeDraftStartingPlayers, activeDraftSubstitutes, activeSlot]);
+  const activeSlotReadyToSave = Boolean(
+    activeSlotPreview &&
+    activeDraft &&
+    activeDraft.startingXI.length === 11 &&
+    activeDraft.substitutes.length === 7 &&
+    activeDraft.reserves.length === 5 &&
+    activeDraft.captainId,
+  );
+  const activeSlotExceedsPowerLimit = Boolean(activeSlotPreview && powerCap && activeSlotPreview.rating > powerCap);
+  const filteredPlayers = useMemo(() => {
+    const query = playerQuery.trim().toLocaleLowerCase('tr-TR');
+    const filtered = query
+      ? allPlayers.filter((player) => (
+        player.name.toLocaleLowerCase('tr-TR').includes(query) ||
+        (player.nationality ?? '').toLocaleLowerCase('tr-TR').includes(query)
+      ))
+      : allPlayers;
+    return filtered.slice(0, 80);
+  }, [allPlayers, playerQuery]);
 
   const setResultNotice = (tone: NoticeTone, text: string) => {
     setNotice({ tone, text });
@@ -234,6 +375,77 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
   };
 
   const requireUser = () => user ?? activateManager();
+
+  const handleCreateFriendLeague = () => {
+    try {
+      const owner = requireUser();
+      const league = createLocalFriendLeague({
+        name: leagueName,
+        ownerId: owner.id,
+        friendCount,
+        powerLimit,
+      });
+      refreshLeagues(league.id);
+      setActiveLeagueId(league.id);
+      setActiveSlotId(league.playerSlots[0]?.id ?? null);
+      setUserMatchQueue([]);
+      setSlotDrafts({});
+      setResultNotice('success', `${league.name} için ${league.playerSlots.length} oyunculu arkadaş ligi oluşturuldu.`);
+    } catch (error) {
+      setResultNotice('error', getErrorMessage(error));
+    }
+  };
+
+  const updateActiveDraft = (patch: Partial<SlotDraft>) => {
+    if (!activeSlot || !activeDraft) return;
+    setSlotDrafts((items) => ({
+      ...items,
+      [activeSlot.id]: {
+        ...activeDraft,
+        ...patch,
+      },
+    }));
+  };
+
+  const addPlayerToDraft = (playerId: string, target: RosterTarget) => {
+    if (!activeDraft || activeDraftSelectedIds.has(playerId)) return;
+    const currentIds = activeDraft[target];
+    if (currentIds.length >= rosterTargetLimits[target]) return;
+    updateActiveDraft({
+      [target]: [...currentIds, playerId],
+    });
+  };
+
+  const removePlayerFromDraft = (playerId: string) => {
+    if (!activeDraft) return;
+    updateActiveDraft({
+      startingXI: activeDraft.startingXI.filter((id) => id !== playerId),
+      substitutes: activeDraft.substitutes.filter((id) => id !== playerId),
+      reserves: activeDraft.reserves.filter((id) => id !== playerId),
+      captainId: activeDraft.captainId === playerId ? null : activeDraft.captainId,
+    });
+  };
+
+  const handleSaveActiveSlot = () => {
+    if (!activeLeague || !activeSlot || !activeDraft || !activeSlotPreview) return;
+    try {
+      const input: PlayerSlotTeamInput = {
+        ...activeSlotPreview,
+        displayName: activeDraft.displayName,
+        reserves: activeDraft.reserves,
+      };
+      const league = savePlayerSlotToLeague(activeLeague.id, activeSlot.id, input);
+      refreshLeagues(league.id);
+      setActiveLeagueId(league.id);
+      const nextSlot = league.playerSlots.find((slot) => !slot.ready && slot.id !== activeSlot.id)
+        ?? league.playerSlots.find((slot) => slot.id === activeSlot.id)
+        ?? null;
+      setActiveSlotId(nextSlot?.id ?? null);
+      setResultNotice('success', `${activeDraft.displayName} hazır.`);
+    } catch (error) {
+      setResultNotice('error', getErrorMessage(error));
+    }
+  };
 
   const handleCreateLeague = () => {
     try {
@@ -279,10 +491,13 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
   const handleStartLeague = () => {
     if (!activeLeague || !user) return;
     try {
-      const league = startLeague(activeLeague.id, user.id, dataset);
+      const league = isLocalFriendLeague
+        ? startLocalFriendLeague(activeLeague.id, user.id, dataset)
+        : startLeague(activeLeague.id, user.id, dataset);
       refreshLeagues(league.id);
       setActiveLeagueId(league.id);
-      setResultNotice('success', `Sezon başladı. ${league.botTeams.length} bot takım eklendi.`);
+      setUserMatchQueue([]);
+      setResultNotice('success', `Sezon başladı. ${league.botTeams.length} gerçek takım lige dahil edildi.`);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
     }
@@ -292,15 +507,20 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
     if (!activeLeague || liveFixture) return;
     try {
       const result = simulateWeek(activeLeague.id, dataset);
+      const resultHumanIds = new Set(result.league.teams.map((team) => team.id));
+      const userFixtures = result.playedRound.filter((fixture) => (
+        resultHumanIds.has(fixture.homeTeamId) || resultHumanIds.has(fixture.awayTeamId)
+      ));
       const userFixture = ownedTeam
-        ? result.playedRound.find((fixture) => fixture.homeTeamId === ownedTeam.id || fixture.awayTeamId === ownedTeam.id)
-        : null;
+        ? userFixtures.find((fixture) => fixture.homeTeamId === ownedTeam.id || fixture.awayTeamId === ownedTeam.id)
+        : userFixtures[0] ?? null;
       refreshLeagues(result.league.id);
       setActiveLeagueId(result.league.id);
-      if (userFixture?.result) {
+      setUserMatchQueue(userFixtures);
+      if (!isLocalFriendLeague && userFixture?.result) {
         setLiveFixture(userFixture);
       } else {
-        setResultNotice('success', `${result.league.currentWeek}. hafta simüle edildi.`);
+        setResultNotice('success', `${result.league.currentWeek}. hafta simüle edildi. ${userFixtures.length} kullanıcı maçı izlenebilir.`);
       }
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
@@ -356,10 +576,60 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
 
       <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
         <aside className="space-y-5">
+          <section className="border-4 border-black bg-green-700 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
+            <div className="mb-4 flex items-center gap-2 border-b border-white/20 pb-3">
+              <Users className="text-yellow-300" size={18} />
+              <h3 className="text-xl font-black uppercase italic">Arkadaş Ligi Oluştur</h3>
+            </div>
+            <div className="grid gap-3">
+              <input
+                value={leagueName}
+                onChange={(event) => setLeagueName(event.target.value)}
+                maxLength={36}
+                className="border-2 border-black bg-white px-3 py-3 text-xs font-black uppercase text-black outline-none"
+                placeholder="Lig adı"
+              />
+              <div className="border-2 border-white/20 bg-black/20 p-3 text-xs font-black uppercase">
+                Lig boyutu: 18 takım / 34 hafta / çift devre
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {friendCountOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setFriendCount(option)}
+                    className={`game-button border-2 border-black px-3 py-3 text-xs font-black uppercase ${friendCount === option ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                {powerLimitOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setPowerLimit(option)}
+                    className={`game-button border-2 border-black px-3 py-3 text-left text-xs font-black uppercase ${powerLimit === option ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}
+                  >
+                    {powerLimitLabels[option]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateFriendLeague}
+                className="game-button flex items-center justify-center gap-2 border-4 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black"
+              >
+                <Plus size={18} /> 18 Takımlı Lig
+              </button>
+            </div>
+          </section>
+
           <section className="border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
             <div className="mb-4 flex items-center gap-2 border-b-2 border-black pb-3">
               <Plus className="text-green-700" size={18} />
-              <h3 className="text-xl font-black uppercase italic">Lig Oluştur</h3>
+              <h3 className="text-xl font-black uppercase italic">Davetli Lig Oluştur</h3>
             </div>
             <div className="grid gap-3">
               <input
@@ -450,12 +720,14 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
                   onClick={() => {
                     setActiveLeagueId(league.id);
                     setLiveFixture(null);
+                    setUserMatchQueue([]);
+                    setActiveSlotId(league.playerSlots?.find((slot) => !slot.ready)?.id ?? league.playerSlots?.[0]?.id ?? null);
                   }}
                   className={`game-button border-2 border-black p-3 text-left text-xs font-black uppercase ${activeLeague?.id === league.id ? 'bg-yellow-400 text-black' : 'bg-zinc-100 text-black'}`}
                 >
                   <span className="block truncate">{league.name}</span>
                   <span className="mt-1 block text-[9px] opacity-60">
-                    {statusLabels[league.status]} / {league.teams.length}+{league.botTeams.length}/{league.maxUsers}
+                    {league.mode === 'local-friends' ? 'Arkadaş' : 'Davetli'} / {statusLabels[league.status]} / {league.teams.length}+{league.botTeams.length}/{league.maxUsers}
                   </span>
                 </button>
               ))}
@@ -506,7 +778,185 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
                 </div>
               </section>
 
-              {activeLeague.status === 'waiting' && (
+              {activeLeague.status === 'waiting' && isLocalFriendLeague && (
+                <section className="space-y-5">
+                  <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+                    <section className="border-4 border-black bg-zinc-950 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
+                      <div className="flex flex-col gap-3 border-b border-white/15 pb-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-green-400">Sıradaki oyuncu takım kuruyor</p>
+                          <h3 className="text-2xl font-black uppercase italic">{activeSlot?.displayName ?? 'Oyuncu'}</h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSaveActiveSlot}
+                          disabled={!activeSlotReadyToSave || activeSlotExceedsPowerLimit}
+                          className="game-button flex items-center gap-2 border-2 border-black bg-green-600 px-4 py-3 text-xs font-black uppercase text-white disabled:opacity-35"
+                        >
+                          <Save size={16} /> Hazır
+                        </button>
+                      </div>
+
+                      {activeDraft && (
+                        <>
+                          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <input
+                              value={activeDraft.displayName}
+                              onChange={(event) => updateActiveDraft({ displayName: event.target.value })}
+                              maxLength={24}
+                              className="border-2 border-white/20 bg-black px-3 py-3 text-xs font-black uppercase text-white outline-none"
+                              placeholder="Oyuncu adı"
+                            />
+                            <input
+                              value={activeDraft.teamName}
+                              onChange={(event) => updateActiveDraft({ teamName: event.target.value })}
+                              maxLength={32}
+                              className="border-2 border-white/20 bg-black px-3 py-3 text-xs font-black uppercase text-white outline-none"
+                              placeholder="Takım adı"
+                            />
+                          </div>
+
+                          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                            <div>
+                              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-yellow-400">Diziliş</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                {FORMATIONS.map((item) => (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => updateActiveDraft({ formation: item.id })}
+                                    className={`game-button border-2 border-black px-3 py-2 text-xs font-black uppercase ${activeDraft.formation === item.id ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}
+                                  >
+                                    {item.id}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-yellow-400">Taktik</p>
+                              <div className="grid gap-2">
+                                {tacticOptions.map((item) => (
+                                  <button
+                                    key={item}
+                                    type="button"
+                                    onClick={() => updateActiveDraft({ tactic: item })}
+                                    className={`game-button border-2 border-black px-3 py-2 text-xs font-black uppercase ${activeDraft.tactic === item ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}
+                                  >
+                                    {item === 'Gegenpress' ? 'Hücum' : item === 'ParkTheBus' ? 'Savunma' : 'Dengeli'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid gap-3 md:grid-cols-4">
+                            <MiniStat dark label="İlk 11" value={`${activeDraft.startingXI.length}/11`} />
+                            <MiniStat dark label="Yedek" value={`${activeDraft.substitutes.length}/7`} />
+                            <MiniStat dark label="Rezerv" value={`${activeDraft.reserves.length}/5`} />
+                            <MiniStat dark label="Güç" value={activeSlotPreview?.rating ?? '-'} />
+                          </div>
+
+                          {activeSlotExceedsPowerLimit && (
+                            <div className="mt-4 border-2 border-red-500 bg-red-500/15 p-3 text-xs font-black uppercase text-red-100">
+                              Takım ortalaması {powerCap} limitini aşıyor.
+                            </div>
+                          )}
+
+                          <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_320px]">
+                            <div className="grid gap-4 md:grid-cols-3">
+                              <DraftRosterList
+                                title="İlk 11"
+                                ids={activeDraft.startingXI}
+                                playerById={playerById}
+                                captainId={activeDraft.captainId}
+                                onCaptain={(playerId) => updateActiveDraft({ captainId: playerId })}
+                                onRemove={removePlayerFromDraft}
+                              />
+                              <DraftRosterList
+                                title="Yedekler"
+                                ids={activeDraft.substitutes}
+                                playerById={playerById}
+                                captainId={null}
+                                onCaptain={() => undefined}
+                                onRemove={removePlayerFromDraft}
+                              />
+                              <DraftRosterList
+                                title="Rezerv"
+                                ids={activeDraft.reserves}
+                                playerById={playerById}
+                                captainId={null}
+                                onCaptain={() => undefined}
+                                onRemove={removePlayerFromDraft}
+                              />
+                            </div>
+
+                            <div className="border-2 border-white/15 bg-white/5 p-3">
+                              <input
+                                value={playerQuery}
+                                onChange={(event) => setPlayerQuery(event.target.value)}
+                                className="mb-3 w-full border-2 border-white/20 bg-black px-3 py-3 text-xs font-black uppercase text-white outline-none"
+                                placeholder="Oyuncu ara"
+                              />
+                              <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+                                {filteredPlayers.map((player) => {
+                                  const selected = activeDraftSelectedIds.has(player.id);
+                                  return (
+                                    <PlayerDraftRow
+                                      key={player.id}
+                                      player={player}
+                                      selected={selected}
+                                      draft={activeDraft}
+                                      onAdd={addPlayerToDraft}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </section>
+
+                    <aside className="space-y-5">
+                      <section className="border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
+                        <div className="flex items-center gap-2 border-b-2 border-black pb-3">
+                          <ShieldCheck className="text-green-700" size={18} />
+                          <h3 className="text-xl font-black uppercase italic">Oyuncu Slotları</h3>
+                        </div>
+                        <div className="mt-4 space-y-3">
+                          {playerSlots.map((slot, index) => (
+                            <button
+                              key={slot.id}
+                              type="button"
+                              onClick={() => setActiveSlotId(slot.id)}
+                              className={`game-button w-full border-2 border-black p-3 text-left text-xs font-black uppercase ${activeSlot?.id === slot.id ? 'bg-yellow-400 text-black' : slot.ready ? 'bg-green-100 text-black' : 'bg-zinc-100 text-black'}`}
+                            >
+                              <span className="flex items-center justify-between gap-2">
+                                <span>{index + 1}. {slot.displayName}</span>
+                                <span>{slot.ready ? 'Hazır' : 'Sırada'}</span>
+                              </span>
+                              <span className="mt-1 block text-[10px] opacity-65">{slot.teamName} / RAT {slot.rating || '-'}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleStartLeague}
+                          disabled={!isOwner || playerSlots.some((slot) => !slot.ready)}
+                          className="game-button mt-5 flex w-full items-center justify-center gap-2 border-4 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black disabled:opacity-35"
+                        >
+                          <Play size={18} fill="currentColor" /> Ligi Başlat
+                        </button>
+                      </section>
+
+                      <RealTeamPanel title="Lige Dahil Edilecek Gerçek Takımlar" teams={includedRealTeams} />
+                      <RealTeamPanel title="Çıkarılacak En Zayıf Takımlar" teams={replacedRealTeams} warning />
+                    </aside>
+                  </div>
+                </section>
+              )}
+
+              {activeLeague.status === 'waiting' && !isLocalFriendLeague && (
                 <section className="grid gap-5 xl:grid-cols-[1fr_340px]">
                   <div className="border-4 border-black bg-zinc-950 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
                     <div className="flex flex-col gap-3 border-b border-white/15 pb-4 md:flex-row md:items-center md:justify-between">
@@ -617,7 +1067,7 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
                             key={fixture.id}
                             fixture={fixture}
                             teamNameOf={teamNameOf}
-                            ownedTeamId={ownedTeam?.id ?? null}
+                            highlightTeamIds={humanTeamIds}
                           />
                         ))}
                       </div>
@@ -637,11 +1087,35 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
                       {latestFixture?.result && (
                         <div className="mt-4">
                           <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-green-400">Son Maç Raporu</p>
-                          <FixtureRow fixture={latestFixture} teamNameOf={teamNameOf} ownedTeamId={ownedTeam?.id ?? null} dark />
+                          <FixtureRow fixture={latestFixture} teamNameOf={teamNameOf} highlightTeamIds={humanTeamIds} dark />
                         </div>
                       )}
                     </section>
                   </div>
+
+                  {userMatchQueue.length > 0 && (
+                    <section className="border-4 border-black bg-yellow-300 p-5 text-black shadow-[6px_6px_0px_0px_#000]">
+                      <div className="mb-4 flex items-center gap-2 border-b-2 border-black pb-3">
+                        <Eye size={18} />
+                        <h3 className="text-xl font-black uppercase italic">Kullanıcı Maçını İzle</h3>
+                      </div>
+                      <div className="grid gap-3">
+                        {userMatchQueue.map((fixture) => (
+                          <button
+                            key={fixture.id}
+                            type="button"
+                            onClick={() => setLiveFixture(fixture)}
+                            className="game-button grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3 border-2 border-black bg-white p-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+                          >
+                            <span className="truncate text-right">{teamNameOf(fixture.homeTeamId)}</span>
+                            <span className="text-xl tabular-nums">{finalScore(fixture) ? `${finalScore(fixture)?.home} - ${finalScore(fixture)?.away}` : 'VS'}</span>
+                            <span className="truncate text-left">{teamNameOf(fixture.awayTeamId)}</span>
+                            <Eye size={16} />
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   {liveFixture?.result && (
                     <LiveMatchPanel
@@ -659,7 +1133,7 @@ export default function MultiplayerLeague({ onBackToQuick }: { onBackToQuick: ()
                       <Users className="text-green-700" size={18} />
                       <h3 className="text-2xl font-black uppercase italic">Puan Tablosu</h3>
                     </div>
-                    <LeagueTable rows={activeLeague.standings} ownedTeamId={ownedTeam?.id ?? null} />
+                    <LeagueTable rows={activeLeague.standings} highlightTeamIds={humanTeamIds} />
                   </section>
                 </section>
               )}
@@ -733,19 +1207,131 @@ function TeamCard({
   );
 }
 
+function DraftRosterList({
+  title,
+  ids,
+  playerById,
+  captainId,
+  onCaptain,
+  onRemove,
+}: {
+  title: string;
+  ids: string[];
+  playerById: Map<string, Player>;
+  captainId: string | null;
+  onCaptain: (playerId: string) => void;
+  onRemove: (playerId: string) => void;
+}) {
+  return (
+    <div className="border-2 border-white/15 bg-white/5 p-3">
+      <h4 className="mb-3 text-sm font-black uppercase text-yellow-400">{title} ({ids.length})</h4>
+      <div className="space-y-2">
+        {ids.length === 0 && <p className="text-xs font-black uppercase text-white/45">Boş</p>}
+        {ids.map((id) => {
+          const player = playerById.get(id);
+          return (
+            <div key={id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border border-white/10 bg-black/25 p-2 text-[10px] font-black uppercase">
+              <span className="min-w-0 truncate">{player ? `#${player.jersey_number} ${player.name}` : id}</span>
+              <button
+                type="button"
+                onClick={() => onCaptain(id)}
+                disabled={title !== 'İlk 11'}
+                className={`grid h-7 w-7 place-items-center border ${captainId === id ? 'border-yellow-400 bg-yellow-400 text-black' : 'border-white/20 text-yellow-400'} disabled:opacity-25`}
+                aria-label="Kaptan seç"
+                title="Kaptan seç"
+              >
+                <Crown size={13} fill={captainId === id ? 'currentColor' : 'none'} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemove(id)}
+                className="grid h-7 w-7 place-items-center border border-red-500 bg-red-600 text-white"
+                aria-label="Oyuncuyu çıkar"
+                title="Oyuncuyu çıkar"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PlayerDraftRow({
+  player,
+  selected,
+  draft,
+  onAdd,
+}: {
+  player: Player;
+  selected: boolean;
+  draft: SlotDraft;
+  onAdd: (playerId: string, target: RosterTarget) => void;
+}) {
+  return (
+    <div className={`border border-white/10 bg-black/25 p-2 text-[10px] font-black uppercase ${selected ? 'opacity-35' : ''}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate">#{player.jersey_number} {player.name}</span>
+        <span className="shrink-0 border border-white/20 px-2 py-1">{player.overall_rating}</span>
+      </div>
+      <p className="mt-1 truncate text-[9px] text-white/45">{player.position} / {player.nationality ?? '-'}</p>
+      <div className="mt-2 grid grid-cols-3 gap-1">
+        {(Object.keys(rosterTargetLabels) as RosterTarget[]).map((target) => (
+          <button
+            key={target}
+            type="button"
+            disabled={selected || draft[target].length >= rosterTargetLimits[target]}
+            onClick={() => onAdd(player.id, target)}
+            className="game-button border border-black bg-yellow-400 px-2 py-2 text-[9px] font-black uppercase text-black disabled:opacity-25"
+          >
+            {rosterTargetLabels[target]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RealTeamPanel({
+  title,
+  teams,
+  warning = false,
+}: {
+  title: string;
+  teams: { id: string; teamName: string; rating: number }[];
+  warning?: boolean;
+}) {
+  return (
+    <section className={`border-4 border-black p-5 shadow-[6px_6px_0px_0px_#000] ${warning ? 'bg-red-50 text-black' : 'bg-white text-black'}`}>
+      <h3 className="border-b-2 border-black pb-3 text-lg font-black uppercase italic">{title}</h3>
+      <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+        {teams.length === 0 && <p className="text-xs font-black uppercase opacity-45">Takım yok</p>}
+        {teams.map((team) => (
+          <div key={team.id} className={`grid grid-cols-[1fr_auto] gap-2 border-2 border-black p-2 text-[10px] font-black uppercase ${warning ? 'bg-red-100' : 'bg-zinc-100'}`}>
+            <span className="truncate">{team.teamName}</span>
+            <span>RAT {team.rating}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function FixtureRow({
   fixture,
   teamNameOf,
-  ownedTeamId,
+  highlightTeamIds,
   dark = false,
 }: {
   fixture: CompetitionFixture;
   teamNameOf: (teamId: string) => string;
-  ownedTeamId: string | null;
+  highlightTeamIds: string[];
   dark?: boolean;
 }) {
   const score = finalScore(fixture);
-  const owned = ownedTeamId === fixture.homeTeamId || ownedTeamId === fixture.awayTeamId;
+  const owned = highlightTeamIds.includes(fixture.homeTeamId) || highlightTeamIds.includes(fixture.awayTeamId);
   return (
     <div className={`grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3 border-2 border-black p-3 text-xs font-black shadow-[3px_3px_0px_0px_#000] ${owned ? 'bg-yellow-400 text-black' : dark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
       <span className="truncate text-right uppercase">{teamNameOf(fixture.homeTeamId)}</span>
@@ -758,10 +1344,10 @@ function FixtureRow({
 
 function LeagueTable({
   rows,
-  ownedTeamId,
+  highlightTeamIds,
 }: {
   rows: MultiplayerStandingRow[];
-  ownedTeamId: string | null;
+  highlightTeamIds: string[];
 }) {
   return (
     <div className="overflow-x-auto">
@@ -773,7 +1359,7 @@ function LeagueTable({
           <div className="border-b border-black/10 py-4 text-center text-xs font-black uppercase opacity-50">Henüz maç oynanmadı</div>
         )}
         {rows.map((row, index) => (
-          <div key={row.teamId} className={`grid grid-cols-[2.5rem_1fr_repeat(8,3rem)_5rem] gap-1 border-b border-black/10 py-2 text-center text-[11px] font-black ${row.teamId === ownedTeamId ? 'bg-yellow-400' : ''}`}>
+          <div key={row.teamId} className={`grid grid-cols-[2.5rem_1fr_repeat(8,3rem)_5rem] gap-1 border-b border-black/10 py-2 text-center text-[11px] font-black ${highlightTeamIds.includes(row.teamId) ? 'bg-yellow-400' : ''}`}>
             <span>{index + 1}</span>
             <span className="truncate text-left uppercase">{row.teamName}{row.isBot ? ' BOT' : ''}</span>
             <span>{row.played}</span>
