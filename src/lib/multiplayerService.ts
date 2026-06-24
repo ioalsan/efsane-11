@@ -508,7 +508,7 @@ const createPlayerSlots = (friendCount: number): PlayerSlot[] => (
   Array.from({ length: clampFriendCount(friendCount) }, (_, index) => ({
     id: `player-slot-${index + 1}`,
     displayName: `Oyuncu ${index + 1}`,
-    teamName: `Oyuncu ${index + 1} FC`,
+    teamName: '',
     selectedSquad: null,
     formation: null,
     tactic: null,
@@ -596,6 +596,7 @@ export const savePlayerSlotToLeague = (
 
   const cap = getPowerLimitCap(league.powerLimit);
   if (cap && input.rating > cap) throw new Error(`Takim ortalamasi ${cap} limitini asiyor.`);
+  if (!input.teamName.trim()) throw new Error('Takim adi zorunlu.');
   if (input.startingXI.length !== 11) throw new Error('Ilk 11 tamamlanmadi.');
   if (input.substitutes.length !== 7) throw new Error('7 yedek secilmeli.');
   if (input.reserves.length !== 5) throw new Error('5 rezerv secilmeli.');

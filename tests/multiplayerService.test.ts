@@ -89,3 +89,36 @@ test('local friend league replaces the weakest real teams and creates a full 18-
   assert.ok(userFixtures.length >= 2);
   assert.ok(userFixtures.every((fixture) => fixture.result));
 });
+
+test('local friend league requires a team name before saving a player slot', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const sourceTeam = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .find((team) => getTeamPlayers(team.id, dataset).length >= 23);
+  assert.ok(sourceTeam);
+
+  const league = createLocalFriendLeague({
+    name: 'Takim Adi Kontrol',
+    ownerId: 'owner-1',
+    friendCount: 2,
+    powerLimit: 'free',
+  });
+  const slot = league.playerSlots[0];
+  const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+  const input = buildMultiplayerTeamInput({
+    ownerId: slot.id,
+    teamName: '',
+    formation: '4-2-3-1',
+    tactic: 'Balanced',
+    captainId: players[0].id,
+    startingPlayers: players.slice(0, 11),
+    substitutes: players.slice(11, 18),
+    reserves: players.slice(18, 23),
+  });
+
+  assert.throws(() => savePlayerSlotToLeague(league.id, slot.id, {
+    ...input,
+    displayName: slot.displayName,
+    reserves: input.reserves ?? [],
+  }), /Takim adi zorunlu/);
+});
