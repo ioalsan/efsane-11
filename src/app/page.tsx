@@ -7,11 +7,12 @@ import PlayerList from '@/components/PlayerList';
 import Tournament from '@/components/Tournament';
 import ManagerLeague from '@/components/ManagerLeague';
 import CareerMode from '@/components/CareerMode';
+import MultiplayerLeague from '@/components/MultiplayerLeague';
 import SquadPanel from '@/components/SquadPanel';
 import ShareExportPanel from '@/components/ShareExportPanel';
 import AdSlot from '@/components/AdSlot';
 import { useTeamStore, MentalityType } from '@/store/useTeamStore';
-import { Sun, Moon, Shield, Flame, Activity, Settings2, Trophy, PencilLine, Database, Medal } from 'lucide-react';
+import { Sun, Moon, Shield, Flame, Activity, Settings2, Trophy, PencilLine, Database, Medal, Users } from 'lucide-react';
 import { FORMATIONS, FormationType } from '@/lib/formations';
 import { decodeShareCode } from '@/lib/shareCode';
 import { saveTeamSnapshot } from '@/lib/localStats';
@@ -41,7 +42,7 @@ export default function Home() {
   const competitions = getCompetitions();
 
   const [appPhase, setAppPhase] = useState<'draft' | 'tournament'>('draft');
-  const [gameMode, setGameMode] = useState<'quick' | 'manager' | 'career'>('quick');
+  const [gameMode, setGameMode] = useState<'quick' | 'manager' | 'career' | 'multiplayer'>('quick');
   const [pendingCompetitionId, setPendingCompetitionId] = useState(competitionId);
   const [pendingFormation, setPendingFormation] = useState<FormationType | null>(formationId);
   const [pendingMentality, setPendingMentality] = useState<MentalityType | null>(mentality);
@@ -144,7 +145,7 @@ export default function Home() {
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Menajer Ligi</p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <button
               type="button"
               onClick={() => setGameMode('quick')}
@@ -164,6 +165,13 @@ export default function Home() {
               className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
             >
               Kariyer
+            </button>
+            <button
+              type="button"
+              onClick={() => setGameMode('multiplayer')}
+              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              Multiplayer
             </button>
           </div>
         </header>
@@ -186,7 +194,7 @@ export default function Home() {
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Kariyer Modu</p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <button
               type="button"
               onClick={() => setGameMode('quick')}
@@ -207,10 +215,66 @@ export default function Home() {
             >
               Kariyer
             </button>
+            <button
+              type="button"
+              onClick={() => setGameMode('multiplayer')}
+              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              Multiplayer
+            </button>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto p-4 lg:p-10">
           <CareerMode onBackToQuick={() => setGameMode('quick')} onGoManager={() => setGameMode('manager')} />
+        </div>
+        <AdSlot placement="mobile-sticky" />
+      </main>
+    );
+  }
+
+  if (gameMode === 'multiplayer') {
+    return (
+      <main className={`min-h-screen flex flex-col transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
+        <header className="flex flex-col gap-4 border-b-2 border-black bg-zinc-900 p-5 text-white sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Users size={24} className="text-green-400" />
+            <div>
+              <h1 className="text-2xl font-black uppercase italic tracking-tighter">CANLI11</h1>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Multiplayer Lig</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => setGameMode('quick')}
+              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              Hızlı Oyna
+            </button>
+            <button
+              type="button"
+              onClick={() => setGameMode('manager')}
+              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              Menajer
+            </button>
+            <button
+              type="button"
+              onClick={() => setGameMode('career')}
+              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              Kariyer
+            </button>
+            <button
+              type="button"
+              className="game-button border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+            >
+              Multiplayer
+            </button>
+          </div>
+        </header>
+        <div className="flex-1 overflow-y-auto p-4 lg:p-10">
+          <MultiplayerLeague onBackToQuick={() => setGameMode('quick')} />
         </div>
         <AdSlot placement="mobile-sticky" />
       </main>
@@ -239,6 +303,13 @@ export default function Home() {
               className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
             >
               Kariyer
+            </button>
+            <button
+              type="button"
+              onClick={() => setGameMode('multiplayer')}
+              className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
+            >
+              Multiplayer
             </button>
             <button onClick={toggleTheme} className="game-button p-3 border border-white/20 hover:bg-white/10 transition-colors rounded-none">
               {isDark ? <Sun size={20} /> : <Moon size={20} />}
@@ -284,6 +355,13 @@ export default function Home() {
             className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
           >
             Kariyer Modu
+          </button>
+          <button
+            type="button"
+            onClick={() => setGameMode('multiplayer')}
+            className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+          >
+            Multiplayer Lig
           </button>
           <Link
             href="/admin"
