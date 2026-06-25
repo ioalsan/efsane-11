@@ -1,24 +1,38 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import DroppableSlot from './DroppableSlot';
 import { useTeamStore } from '@/store/useTeamStore';
 import { FORMATIONS, FormationType, PositionConfig } from '@/lib/formations';
+import type { Player } from '@/types';
 
 interface PitchProps {
   elementId?: string;
   previewFormationId?: FormationType | null;
+  controlled?: {
+    selectedPlayers: (Player | null)[];
+    teamRating: number | string;
+    formationId: FormationType;
+    squadName: string;
+    blindMode?: boolean;
+    renderSlot: (position: PositionConfig, player: Player | null) => ReactNode;
+  };
 }
 
-export default function Pitch({ elementId = 'pitch-container', previewFormationId = null }: PitchProps) {
-  const selectedPlayers = useTeamStore((state) => state.selectedPlayers);
-  const teamRating = useTeamStore((state) => state.teamRating);
+export default function Pitch({ elementId = 'pitch-container', previewFormationId = null, controlled }: PitchProps) {
+  const storeSelectedPlayers = useTeamStore((state) => state.selectedPlayers);
+  const storeTeamRating = useTeamStore((state) => state.teamRating);
   const storedFormationId = useTeamStore((state) => state.formation);
-  const currentFormationId = previewFormationId ?? storedFormationId ?? '4-3-3';
-  const blindMode = useTeamStore(state => state.blindMode);
+  const storeBlindMode = useTeamStore(state => state.blindMode);
   const theme = useTeamStore(state => state.theme);
-  const squadName = useTeamStore(state => state.squadName);
+  const storeSquadName = useTeamStore(state => state.squadName);
   
   const isDark = theme === 'dark';
+  const selectedPlayers = controlled?.selectedPlayers ?? storeSelectedPlayers;
+  const teamRating = controlled?.teamRating ?? storeTeamRating;
+  const blindMode = controlled?.blindMode ?? storeBlindMode;
+  const squadName = controlled?.squadName ?? storeSquadName;
+  const currentFormationId = controlled?.formationId ?? previewFormationId ?? storedFormationId ?? '4-3-3';
   const currentFormation = FORMATIONS.find(f => f.id === currentFormationId) || FORMATIONS[1];
 
   const totalSelected = selectedPlayers.filter(p => p !== null).length;
@@ -55,11 +69,15 @@ export default function Pitch({ elementId = 'pitch-container', previewFormationI
       <div className="relative z-10 w-full h-full">
         {currentFormation.positions.map((pos: PositionConfig) => (
           <div key={pos.index} style={pos.style}>
-            <DroppableSlot 
-              index={pos.index} 
-              player={selectedPlayers[pos.index]} 
-              allowedPosition={pos.allowedPosition} 
-            />
+            {controlled ? (
+              controlled.renderSlot(pos, selectedPlayers[pos.index] ?? null)
+            ) : (
+              <DroppableSlot
+                index={pos.index}
+                player={selectedPlayers[pos.index]}
+                allowedPosition={pos.allowedPosition}
+              />
+            )}
           </div>
         ))}
       </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import Pitch from '@/components/Pitch';
 import PlayerList from '@/components/PlayerList';
@@ -20,6 +20,9 @@ import { getCompetitions } from '@/lib/seasonRepository';
 import { getTacticProfile } from '@/lib/teamManagement';
 import { loadCareer, getManagerLevel, type CareerSave } from '@/lib/careerMode';
 import { loadProfile, type ProfileStats } from '@/lib/profileService';
+
+type MultiplayerFocus = 'friends' | 'invite';
+const showLegacyCareerEntry = false;
 
 export default function Home() {
   const selectedPlayers = useTeamStore((state) => state.selectedPlayers);
@@ -43,6 +46,7 @@ export default function Home() {
 
   const [appPhase, setAppPhase] = useState<'draft' | 'tournament'>('draft');
   const [gameMode, setGameMode] = useState<'quick' | 'manager' | 'career' | 'multiplayer'>('quick');
+  const [multiplayerFocus, setMultiplayerFocus] = useState<MultiplayerFocus>('friends');
   const [pendingCompetitionId, setPendingCompetitionId] = useState(competitionId);
   const [pendingFormation, setPendingFormation] = useState<FormationType | null>(formationId);
   const [pendingMentality, setPendingMentality] = useState<MentalityType | null>(mentality);
@@ -52,6 +56,11 @@ export default function Home() {
   const loadedShareRef = useRef(false);
   const savedDraftRef = useRef<string | null>(null);
   const captainPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const openMultiplayer = (focus: MultiplayerFocus) => {
+    setMultiplayerFocus(focus);
+    setGameMode('multiplayer');
+  };
 
   const handleFormationSelect = (nextFormation: FormationType) => {
     setPendingFormation(nextFormation);
@@ -125,6 +134,7 @@ export default function Home() {
   }, [hasCaptain, isTeamFull, setupComplete]);
 
   useEffect(() => {
+    if (!showLegacyCareerEntry) return;
     const loadResume = () => {
       setCareerResume(loadCareer());
       setProfileStats(loadProfile());
@@ -132,7 +142,7 @@ export default function Home() {
     loadResume();
     window.addEventListener('storage', loadResume);
     return () => window.removeEventListener('storage', loadResume);
-  }, [gameMode]);
+  }, []);
 
   if (gameMode === 'manager') {
     return (
@@ -145,7 +155,7 @@ export default function Home() {
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Menajer Ligi</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => setGameMode('quick')}
@@ -194,7 +204,7 @@ export default function Home() {
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Kariyer Modu</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => setGameMode('quick')}
@@ -204,10 +214,10 @@ export default function Home() {
             </button>
             <button
               type="button"
-              onClick={() => setGameMode('manager')}
+              onClick={() => openMultiplayer('friends')}
               className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
             >
-              Menajer
+              Arkadaş Ligi
             </button>
             <button
               type="button"
@@ -253,28 +263,22 @@ export default function Home() {
             </button>
             <button
               type="button"
-              onClick={() => setGameMode('manager')}
-              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+              onClick={() => openMultiplayer('friends')}
+              className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000] ${multiplayerFocus === 'friends' ? 'bg-yellow-400' : 'bg-white'}`}
             >
-              Menajer
+              Arkadaş Ligi
             </button>
             <button
               type="button"
-              onClick={() => setGameMode('career')}
-              className="game-button border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
+              onClick={() => openMultiplayer('invite')}
+              className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000] ${multiplayerFocus === 'invite' ? 'bg-yellow-400' : 'bg-white'}`}
             >
-              Kariyer
-            </button>
-            <button
-              type="button"
-              className="game-button border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
-            >
-              Multiplayer
+              Davetli Lig
             </button>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto p-4 lg:p-10">
-          <MultiplayerLeague onBackToQuick={() => setGameMode('quick')} />
+          <MultiplayerLeague onBackToQuick={() => setGameMode('quick')} focusMode={multiplayerFocus} />
         </div>
         <AdSlot placement="mobile-sticky" />
       </main>
@@ -289,27 +293,36 @@ export default function Home() {
               <Trophy size={24} className="text-yellow-500" />
               <h1 className="text-2xl font-black italic tracking-tighter uppercase">TURNUVA MODU</h1>
            </div>
-           <div className="flex items-center gap-3">
+           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => setGameMode('manager')}
+              onClick={() => {
+                setAppPhase('draft');
+                setGameMode('quick');
+              }}
               className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
             >
-              Menajer Ligi
+              Hızlı Oyna
             </button>
             <button
               type="button"
-              onClick={() => setGameMode('career')}
+              onClick={() => {
+                setAppPhase('draft');
+                openMultiplayer('friends');
+              }}
               className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
             >
-              Kariyer
+              Arkadaş Ligi
             </button>
             <button
               type="button"
-              onClick={() => setGameMode('multiplayer')}
+              onClick={() => {
+                setAppPhase('draft');
+                openMultiplayer('invite');
+              }}
               className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
             >
-              Multiplayer
+              Davetli Lig
             </button>
             <button onClick={toggleTheme} className="game-button p-3 border border-white/20 hover:bg-white/10 transition-colors rounded-none">
               {isDark ? <Sun size={20} /> : <Moon size={20} />}
@@ -328,44 +341,44 @@ export default function Home() {
     <main className={`min-h-screen flex flex-col transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
       
       {/* HEADER */}
-      <header className={`p-6 flex justify-between items-center border-b-2 border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
+      <header className={`p-5 sm:p-6 flex justify-between items-center border-b-2 border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
         <div className="flex flex-col">
-           <h1 className="text-4xl font-black italic tracking-tighter leading-none">EFSANE-11</h1>
-           <div className="text-xs uppercase font-bold tracking-[0.2em] opacity-40 mt-1">Kadro Kur • Simüle Et • Kazan</div>
+           <h1 className="text-4xl font-black italic tracking-tighter leading-none">CANLI11</h1>
+           <div className="text-xs uppercase font-bold tracking-[0.2em] opacity-40 mt-1">Kadro Kur • Simüle Et • Paylaş</div>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => setGameMode('quick')}
-            className="game-button hidden border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:block"
+            className="game-button hidden border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:hidden"
           >
             Hızlı Oyna
           </button>
           <button
             type="button"
             onClick={() => setGameMode('manager')}
-            className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+            className={`hidden game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
           >
             Menajer Ligi
           </button>
           <button
             type="button"
             onClick={() => setGameMode('career')}
-            className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+            className={`hidden game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
           >
             Kariyer Modu
           </button>
           <button
             type="button"
             onClick={() => setGameMode('multiplayer')}
-            className={`game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+            className={`hidden game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
           >
             Multiplayer Lig
           </button>
           <Link
             href="/admin"
-            className={`game-button grid h-12 w-12 place-items-center border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+            className={`hidden game-button h-12 w-12 place-items-center border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
             aria-label="Admin paneli"
             title="Admin paneli"
           >
@@ -377,7 +390,41 @@ export default function Home() {
         </div>
       </header>
 
-      {careerResume && (
+      <section className={`border-b-4 border-black px-4 py-5 ${isDark ? 'bg-zinc-950 text-white' : 'bg-yellow-50 text-black'}`}>
+        <div className="mx-auto grid max-w-7xl gap-3 md:grid-cols-3">
+          <ModeCard
+            title="Arkadaş Ligi"
+            eyebrow="Canlı11'in önerilen modu"
+            description="Aynı cihazda arkadaşlarınla 18 takımlı sezon kur."
+            icon={<Users size={24} />}
+            highlighted
+            action="Arkadaş Ligi Aç"
+            meta={isTeamFull && hasCaptain ? 'Hızlı Oyna kadron aktarılabilir' : '2-18 oyuncu'}
+            onClick={() => openMultiplayer('friends')}
+          />
+          <ModeCard
+            title="Davetli Lig"
+            eyebrow="Kodla katılım"
+            description="Davet koduyla asenkron lig odası oluştur veya katıl."
+            icon={<Shield size={24} />}
+            action="Davetli Lig Aç"
+            meta="LocalStorage MVP"
+            onClick={() => openMultiplayer('invite')}
+          />
+          <ModeCard
+            title="Hızlı Oyna"
+            eyebrow="Solo draft"
+            description="Kadro kur, 2D simülasyonu izle ve takımını paylaş."
+            icon={<Activity size={24} />}
+            active
+            action={isTeamFull && hasCaptain ? 'Kadro Hazır' : 'Kadro Kur'}
+            meta={`${selectedCount}/11`}
+            onClick={() => setGameMode('quick')}
+          />
+        </div>
+      </section>
+
+      {showLegacyCareerEntry && careerResume && (
         <section className={`border-b-4 border-black px-4 py-4 ${isDark ? 'bg-yellow-400 text-black' : 'bg-yellow-300 text-black'}`}>
           <div className="mx-auto grid max-w-7xl gap-3 md:grid-cols-[1fr_auto] md:items-center">
             <div>
@@ -584,5 +631,56 @@ export default function Home() {
       </div>
       <AdSlot placement="mobile-sticky" />
     </main>
+  );
+}
+
+function ModeCard({
+  title,
+  eyebrow,
+  description,
+  icon,
+  action,
+  meta,
+  onClick,
+  highlighted = false,
+  active = false,
+}: {
+  title: string;
+  eyebrow: string;
+  description: string;
+  icon: ReactNode;
+  action: string;
+  meta: string;
+  onClick: () => void;
+  highlighted?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`game-button min-h-44 border-4 border-black p-5 text-left shadow-[6px_6px_0px_0px_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[3px_3px_0px_0px_#000] ${
+        highlighted
+          ? 'bg-yellow-400 text-black'
+          : active
+            ? 'bg-green-600 text-white'
+            : 'bg-white text-black'
+      }`}
+    >
+      <span className="flex items-start justify-between gap-4">
+        <span>
+          <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">{eyebrow}</span>
+          <span className="mt-2 block text-2xl font-black uppercase italic tracking-tight">{title}</span>
+        </span>
+        <span className={`grid h-12 w-12 shrink-0 place-items-center border-2 border-black ${highlighted ? 'bg-black text-yellow-400' : active ? 'bg-yellow-400 text-black' : 'bg-zinc-950 text-yellow-400'}`}>
+          {icon}
+        </span>
+      </span>
+      <span className="mt-4 block text-xs font-black uppercase leading-relaxed opacity-70">{description}</span>
+      <span className="mt-5 flex items-center justify-between gap-3 border-t-2 border-black/25 pt-4">
+        <span className="text-sm font-black uppercase">{action}</span>
+        <span className="border-2 border-black bg-black px-2 py-1 text-[10px] font-black uppercase text-white">{meta}</span>
+      </span>
+    </button>
   );
 }

@@ -90,6 +90,55 @@ test('local friend league replaces the weakest real teams and creates a full 18-
   assert.ok(userFixtures.every((fixture) => fixture.result));
 });
 
+test('local friend league uses the selected competition pool for real teams', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const competitionId = 'world-cup-2026';
+  const competitionTeamIds = new Set(getCompetitionTeams(competitionId, dataset).map((team) => team.id));
+  const sourceTeams = getCompetitionTeams(competitionId, dataset)
+    .filter((team) => getTeamPlayers(team.id, dataset).length >= 23)
+    .slice(0, 2);
+
+  const league = createLocalFriendLeague({
+    name: 'Dunya Kupasi Arkadas',
+    ownerId: 'owner-1',
+    friendCount: 2,
+    powerLimit: 'free',
+    competitionId,
+  });
+
+  let nextLeague = league;
+  league.playerSlots.forEach((slot, index) => {
+    const players = getTeamPlayers(sourceTeams[index].id, dataset).map(toLegacyPlayer);
+    const input = buildMultiplayerTeamInput({
+      ownerId: slot.id,
+      teamName: `${slot.displayName} WC`,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0].id,
+      startingPlayers: players.slice(0, 11),
+      substitutes: players.slice(11, 18),
+      reserves: players.slice(18, 23),
+    });
+    nextLeague = savePlayerSlotToLeague(nextLeague.id, slot.id, {
+      ...input,
+      displayName: slot.displayName,
+      reserves: input.reserves ?? [],
+    });
+  });
+
+  const started = startLocalFriendLeague(nextLeague.id, 'owner-1', dataset);
+  const replacementPlan = getRealTeamReplacementPlan(2, dataset, competitionId);
+
+  assert.equal(started.competitionId, competitionId);
+  assert.deepEqual(
+    started.replacedTeams.map((team) => team.sourceTeamId),
+    replacementPlan.replacedTeams.map((team) => team.sourceTeamId),
+  );
+  assert.ok(started.realTeams.every((team) => competitionTeamIds.has(team.sourceTeamId)));
+  assert.ok(started.replacedTeams.every((team) => competitionTeamIds.has(team.sourceTeamId)));
+});
+
 test('local friend league requires a team name before saving a player slot', () => {
   installLocalStorage();
   const dataset = getSeasonDataset();
