@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildMultiplayerTeamInput,
+  consumeMultiplayerMigrationNotice,
   createLocalFriendLeague,
   getRealTeamReplacementPlan,
+  listLeagues,
   savePlayerSlotToLeague,
   simulateWeek,
   startLocalFriendLeague,
@@ -18,6 +20,7 @@ import {
 
 const installLocalStorage = () => {
   const storage = new Map<string, string>();
+  const sessionStorage = new Map<string, string>();
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
@@ -26,9 +29,79 @@ const installLocalStorage = () => {
         setItem: (key: string, value: string) => storage.set(key, value),
         removeItem: (key: string) => storage.delete(key),
       },
+      sessionStorage: {
+        getItem: (key: string) => sessionStorage.get(key) ?? null,
+        setItem: (key: string, value: string) => sessionStorage.set(key, value),
+        removeItem: (key: string) => sessionStorage.delete(key),
+      },
     },
   });
 };
+
+test('cleans corrupt multiplayer roster saves with empty first eleven and filled bench', () => {
+  installLocalStorage();
+  const storageKey = 'canli11:multiplayer-leagues:v1';
+  const league = createLocalFriendLeague({
+    name: 'Bozuk Kadro Ligi',
+    ownerId: 'owner-1',
+    friendCount: 2,
+    powerLimit: 'free',
+  });
+  const slot = league.playerSlots[0];
+  const benchIds = Array.from({ length: 7 }, (_, index) => `bench-player-${index + 1}`);
+  const corruptedLeague = {
+    ...league,
+    playerSlots: league.playerSlots.map((item) => (
+      item.id === slot.id
+        ? {
+          ...item,
+          teamName: 'Broken FC',
+          selectedSquad: {
+            startingXI: [],
+            substitutes: benchIds,
+            reserves: [],
+          },
+          formation: '4-2-3-1' as const,
+          tactic: 'Balanced' as const,
+          captainId: benchIds[0],
+          ready: true,
+          teamId: 'broken-team',
+          rating: 77,
+          chemistry: 60,
+        }
+        : item
+    )),
+    teams: [{
+      id: 'broken-team',
+      ownerId: slot.id,
+      teamName: 'Broken FC',
+      formation: '4-2-3-1' as const,
+      tactic: 'Balanced' as const,
+      captainId: benchIds[0],
+      startingXI: [],
+      substitutes: benchIds,
+      reserves: [],
+      rating: 77,
+      chemistry: 60,
+      isBot: false,
+      createdAt: league.createdAt,
+      updatedAt: league.updatedAt,
+    }],
+  };
+
+  window.localStorage.setItem(storageKey, JSON.stringify([corruptedLeague]));
+
+  const cleanedLeague = listLeagues()[0];
+  const cleanedSlot = cleanedLeague.playerSlots[0];
+
+  assert.equal(cleanedLeague.teams.length, 0);
+  assert.equal(cleanedSlot.ready, false);
+  assert.equal(cleanedSlot.selectedSquad, null);
+  assert.equal(cleanedSlot.teamId, null);
+  assert.equal(cleanedSlot.rating, 0);
+  assert.equal(consumeMultiplayerMigrationNotice(), true);
+  assert.equal(consumeMultiplayerMigrationNotice(), false);
+});
 
 test('local friend league replaces the weakest real teams and creates a full 18-team season', () => {
   installLocalStorage();

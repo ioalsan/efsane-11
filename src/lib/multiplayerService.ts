@@ -154,6 +154,7 @@ export interface SimulateWeekResult {
 }
 
 const STORAGE_KEY = 'canli11:multiplayer-leagues:v1';
+const MIGRATION_NOTICE_KEY = 'canli11:multiplayer-migration-notice:v1';
 const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 const now = () => new Date().toISOString();
@@ -167,6 +168,75 @@ const isValidMaxUsers = (value: number): value is MultiplayerMaxUsers => (
 );
 
 const clampFriendCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
+
+const countStoredIds = (ids?: string[]) => (
+  Array.isArray(ids) ? ids.filter((id) => id.trim().length > 0).length : 0
+);
+
+const hasCorruptRosterSave = (roster: { startingXI?: string[]; substitutes?: string[] } | null | undefined) => (
+  Boolean(roster) && countStoredIds(roster?.startingXI) === 0 && countStoredIds(roster?.substitutes) > 0
+);
+
+const markMigrationNotice = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(MIGRATION_NOTICE_KEY, 'broken-roster-cleaned');
+  } catch {
+    // Session storage can be unavailable in private contexts; the data cleanup still succeeds.
+  }
+};
+
+export const consumeMultiplayerMigrationNotice = () => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const notice = window.sessionStorage.getItem(MIGRATION_NOTICE_KEY);
+    if (!notice) return false;
+    window.sessionStorage.removeItem(MIGRATION_NOTICE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const cleanCorruptWaitingLeague = (league: MultiplayerLeague) => {
+  if (league.status !== 'waiting') return league;
+
+  const corruptOwnerIds = new Set(
+    league.teams
+      .filter((team) => hasCorruptRosterSave(team))
+      .map((team) => team.ownerId),
+  );
+  const teams = league.teams.filter((team) => !hasCorruptRosterSave(team));
+  let changed = teams.length !== league.teams.length;
+
+  const playerSlots = (league.playerSlots ?? []).map((slot) => {
+    if (!hasCorruptRosterSave(slot.selectedSquad) && !corruptOwnerIds.has(slot.id)) return slot;
+    changed = true;
+    return {
+      ...slot,
+      teamName: '',
+      selectedSquad: null,
+      formation: null,
+      tactic: null,
+      captainId: null,
+      ready: false,
+      teamId: null,
+      rating: 0,
+      chemistry: 0,
+      updatedAt: now(),
+    };
+  });
+
+  if (!changed) return league;
+
+  return {
+    ...league,
+    teams,
+    playerSlots,
+    standings: [],
+    updatedAt: now(),
+  };
+};
 
 export const getPowerLimitCap = (powerLimit: MultiplayerPowerLimit): number | null => {
   if (powerLimit === 'max80') return 80;
@@ -183,7 +253,14 @@ const readLeagues = (): MultiplayerLeague[] => {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isMultiplayerLeague);
+    const leagues = parsed.filter(isMultiplayerLeague);
+    const cleanedLeagues = leagues.map(cleanCorruptWaitingLeague);
+    const changed = cleanedLeagues.some((league, index) => league !== leagues[index]);
+    if (changed) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanedLeagues));
+      markMigrationNotice();
+    }
+    return cleanedLeagues;
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
     return [];

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Copy,
   Crown,
@@ -28,6 +28,7 @@ import {
   getTeamDisplayName,
   joinLeague,
   listLeagues,
+  consumeMultiplayerMigrationNotice,
   savePlayerSlotToLeague,
   saveTeamToLeague,
   simulateWeek,
@@ -129,6 +130,9 @@ interface InviteDraft {
   startingXI: string[];
   substitutes: string[];
   reserves: string[];
+  rolledSquadId: string | null;
+  pickAvailable: boolean;
+  autoRoll: boolean;
 }
 
 type PlacementSource = 'pool' | 'draft' | RosterTarget;
@@ -155,6 +159,10 @@ const compactIds = (ids: string[]) => ids.filter((id) => id.trim().length > 0);
 
 const getRosterCount = (ids: string[]) => compactIds(ids).length;
 
+const hasBrokenRosterSave = (roster: { startingXI: string[]; substitutes: string[] }) => (
+  getRosterCount(roster.startingXI) === 0 && getRosterCount(roster.substitutes) > 0
+);
+
 const normalizeStartingSlots = (ids: string[]) => (
   Array.from({ length: rosterTargetLimits.startingXI }, (_, index) => ids[index] ?? '')
 );
@@ -167,6 +175,9 @@ const createEmptyInviteDraft = (): InviteDraft => ({
   startingXI: normalizeStartingSlots([]),
   substitutes: [],
   reserves: [],
+  rolledSquadId: null,
+  pickAvailable: false,
+  autoRoll: false,
 });
 
 const modernPositionToLegacy: Record<string, Player['position']> = {
@@ -302,7 +313,7 @@ const addRosterPlayer = <
   return { ...draft, [target]: [...currentIds, playerId] };
 };
 
-const draftPlayerIds = (draft: SlotDraft) => [
+const draftPlayerIds = (draft: Pick<SlotDraft, 'startingXI' | 'substitutes' | 'reserves'>) => [
   ...draft.startingXI,
   ...draft.substitutes,
   ...draft.reserves,
@@ -401,8 +412,14 @@ export default function MultiplayerLeague({
 
   const onlineConfigured = isFirebaseConfigured();
 
+  const showRosterMigrationNotice = useCallback(() => {
+    if (!consumeMultiplayerMigrationNotice()) return;
+    setNotice({ tone: 'info', text: 'Eski bozuk kadro kaydı temizlendi. Takımını yeniden kur.' });
+  }, []);
+
   const getVisibleLeagues = (onlineItems = onlineInviteLeagues) => {
     const localLeagues = listLeagues();
+    showRosterMigrationNotice();
     if (!onlineConfigured) return localLeagues;
     return [
       ...localLeagues.filter((league) => league.mode === 'local-friends'),
@@ -440,6 +457,11 @@ export default function MultiplayerLeague({
           : nextLeagues[0]?.id ?? null
       ));
     };
+    const listLocalLeagues = () => {
+      const localLeagues = listLeagues();
+      showRosterMigrationNotice();
+      return localLeagues;
+    };
     const timer = window.setTimeout(() => {
       const existingUser = getCurrentUser();
       const currentUser = existingUser ?? createLocalUser();
@@ -449,7 +471,7 @@ export default function MultiplayerLeague({
       if (!isFirebaseConfigured()) {
         setUser(currentUser);
         setOnlineReady(false);
-        selectLeagueList(listLeagues());
+        selectLeagueList(listLocalLeagues());
         return;
       }
 
@@ -457,7 +479,7 @@ export default function MultiplayerLeague({
         if (!firebaseUser) {
           setUser(currentUser);
           setOnlineReady(false);
-          selectLeagueList(listLeagues().filter((league) => league.mode === 'local-friends'));
+          selectLeagueList(listLocalLeagues().filter((league) => league.mode === 'local-friends'));
           return;
         }
 
@@ -471,7 +493,7 @@ export default function MultiplayerLeague({
         unsubscribeLeagues = subscribeOnlineLeagues(firebaseUser.uid, (items) => {
           setOnlineInviteLeagues(items);
           selectLeagueList([
-            ...listLeagues().filter((league) => league.mode === 'local-friends'),
+            ...listLocalLeagues().filter((league) => league.mode === 'local-friends'),
             ...items,
           ]);
         }, (error) => {
@@ -488,7 +510,7 @@ export default function MultiplayerLeague({
       unsubscribeAuth?.();
       unsubscribeLeagues?.();
     };
-  }, []);
+  }, [showRosterMigrationNotice]);
 
   const activeLeague = useMemo(
     () => leagues.find((league) => league.id === activeLeagueId) ?? leagues[0] ?? null,
@@ -634,29 +656,23 @@ export default function MultiplayerLeague({
   }, [inviteDraft, inviteReservePlayers, inviteStartingPlayers, inviteSubstitutePlayers, user]);
   const powerCap = activeLeague ? getPowerLimitCap(activeLeague.powerLimit) : null;
   const exceedsPowerLimit = Boolean(teamPreview && powerCap && teamPreview.rating > powerCap);
+  const inviteDraftTotal = useMemo(() => draftPlayerIds(inviteDraft).length, [inviteDraft]);
   const inviteDraftSelectedIds = useMemo(
-    () => new Set(draftPlayerIds({
-      ...inviteDraft,
-      displayName: '',
-      rolledSquadId: null,
-      pickAvailable: false,
-      autoRoll: false,
-      formation: inviteDraft.formation ?? '4-2-3-1',
-      tactic: inviteDraft.tactic ?? 'Balanced',
-    })),
+    () => new Set(draftPlayerIds(inviteDraft)),
     [inviteDraft],
   );
-  const inviteAvailablePlayers = useMemo(() => {
-    const playerMap = new Map<string, Player>();
-    [...startingPlayers, ...substitutePlayers, ...quickReservePlayers].forEach((player) => {
-      playerMap.set(player.id, player);
-    });
-    inviteDraftSelectedIds.forEach((id) => {
-      const player = playerById.get(id);
-      if (player) playerMap.set(id, player);
-    });
-    return Array.from(playerMap.values()).sort((a, b) => playerScore(b) - playerScore(a));
-  }, [inviteDraftSelectedIds, playerById, quickReservePlayers, startingPlayers, substitutePlayers]);
+  const inviteRolledSquad = useMemo(
+    () => draftSquads.find((squad) => squad.id === inviteDraft.rolledSquadId) ?? null,
+    [draftSquads, inviteDraft.rolledSquadId],
+  );
+  const inviteRolledTeam = useMemo(
+    () => getSquadTeamMeta(inviteRolledSquad, teamById),
+    [inviteRolledSquad, teamById],
+  );
+  const inviteRolledTeamRating = useMemo(
+    () => inviteRolledSquad ? getAverageRating(inviteRolledSquad.players) : 0,
+    [inviteRolledSquad],
+  );
   const invitePlacementPlayer = invitePlacement ? playerById.get(invitePlacement.playerId) ?? null : null;
   const inviteSaveIssues = useMemo(() => {
     const issues: string[] = [];
@@ -682,6 +698,19 @@ export default function MultiplayerLeague({
     substitutes: inviteDraft.substitutes,
     reserves: inviteDraft.reserves,
   }), [inviteDraft]);
+  const inviteRollDraft = useMemo<SlotDraft>(() => ({
+    displayName: managerName,
+    teamName: inviteDraft.teamName,
+    formation: inviteDraft.formation ?? '4-2-3-1',
+    tactic: inviteDraft.tactic ?? 'Balanced',
+    captainId: inviteDraft.captainId,
+    startingXI: inviteDraft.startingXI,
+    substitutes: inviteDraft.substitutes,
+    reserves: inviteDraft.reserves,
+    rolledSquadId: inviteDraft.rolledSquadId,
+    pickAvailable: inviteDraft.pickAvailable,
+    autoRoll: inviteDraft.autoRoll,
+  }), [inviteDraft, managerName]);
   const quickInviteDraft = useMemo<InviteDraft>(() => {
     const quickStartingIds = selectedPlayers.map((player) => player?.id ?? '');
     const hasQuickStartingXI = startingPlayers.length === 11;
@@ -694,10 +723,14 @@ export default function MultiplayerLeague({
       startingXI: normalizeStartingSlots(hasQuickStartingXI ? quickStartingIds : []),
       substitutes: hasQuickStartingXI ? substitutePlayers.map((player) => player.id) : [],
       reserves: hasQuickStartingXI ? quickReservePlayers.map((player) => player.id) : [],
+      rolledSquadId: null,
+      pickAvailable: false,
+      autoRoll: false,
     };
   }, [captainId, formation, quickReservePlayers, selectedPlayers, squadName, startingPlayers.length, substitutePlayers, tactic]);
   const savedInviteDraft = useMemo<InviteDraft | null>(() => {
     if (!ownedTeam) return null;
+    if (hasBrokenRosterSave(ownedTeam)) return null;
     return {
       teamName: ownedTeam.teamName,
       formation: ownedTeam.formation,
@@ -706,8 +739,21 @@ export default function MultiplayerLeague({
       startingXI: normalizeStartingSlots(ownedTeam.startingXI),
       substitutes: ownedTeam.substitutes,
       reserves: ownedTeam.reserves ?? [],
+      rolledSquadId: null,
+      pickAvailable: false,
+      autoRoll: false,
     };
   }, [ownedTeam]);
+
+  useEffect(() => {
+    if (!activeLeague || activeLeague.mode !== 'invite' || !ownedTeam || !hasBrokenRosterSave(ownedTeam)) return;
+    const timer = window.setTimeout(() => {
+      setInviteDraft(createEmptyInviteDraft());
+      setInvitePlacement(null);
+      setNotice({ tone: 'info', text: 'Eski bozuk kadro kaydı temizlendi. Takımını yeniden kur.' });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeLeague, ownedTeam]);
 
   useEffect(() => {
     if (!activeLeague || activeLeague.mode !== 'invite' || activeLeague.status !== 'waiting') return;
@@ -847,6 +893,14 @@ export default function MultiplayerLeague({
       : { pickAvailable: false };
   };
 
+  const getInvitePickCompletionPatch = (nextTotal: number): Partial<InviteDraft> => {
+    if (!inviteDraft.autoRoll || nextTotal >= 23) return { pickAvailable: false };
+    const nextSquad = getRandomDraftSquad(inviteDraft.rolledSquadId);
+    return nextSquad
+      ? { rolledSquadId: nextSquad.id, pickAvailable: true }
+      : { pickAvailable: false };
+  };
+
   const rollActiveSquad = () => {
     if (!activeDraft) return;
     if (!activeDraft.teamName.trim()) {
@@ -865,6 +919,24 @@ export default function MultiplayerLeague({
     });
     setPendingPlacementPlayerId(null);
     setPendingPlacementSource(null);
+  };
+
+  const rollInviteSquad = () => {
+    if (!inviteDraft.teamName.trim()) {
+      setResultNotice('error', 'Kadro kurmak için önce takım adı gir.');
+      return;
+    }
+    if (inviteDraftTotal >= 23) return;
+    if (inviteDraft.pickAvailable) return;
+    if (draftSquads.length === 0) return;
+
+    const randomSquad = getRandomDraftSquad(inviteDraft.rolledSquadId);
+    if (!randomSquad) return;
+    updateInviteDraft({
+      rolledSquadId: randomSquad.id,
+      pickAvailable: true,
+    });
+    setInvitePlacement(null);
   };
 
   const selectDraftPlayer = (playerId: string) => {
@@ -1033,6 +1105,15 @@ export default function MultiplayerLeague({
   };
 
   const selectInvitePlayerForPlacement = (playerId: string, source: PlacementSource = 'pool', slotIndex?: number) => {
+    if (source === 'draft') {
+      if (!inviteDraft.teamName.trim()) {
+        setResultNotice('error', 'Kadro kurmak için önce takım adı gir.');
+        return;
+      }
+      if (!inviteDraft.pickAvailable) return;
+      if (inviteDraftSelectedIds.has(playerId)) return;
+      if (!inviteRolledSquad?.players.some((player) => player.id === playerId)) return;
+    }
     const fromRoster = source !== 'pool' && source !== 'draft';
     if (fromRoster && !inviteDraftSelectedIds.has(playerId)) return;
     setInvitePlacement({ playerId, source, slotIndex });
@@ -1041,7 +1122,13 @@ export default function MultiplayerLeague({
   const placeInvitePlayer = (target: RosterTarget, slotIndex?: number) => {
     if (!invitePlacementPlayer || !invitePlacement) return;
     const fromPool = invitePlacement.source === 'pool';
+    const fromDraft = invitePlacement.source === 'draft';
     if (fromPool && inviteDraftSelectedIds.has(invitePlacementPlayer.id)) return;
+    if (fromDraft) {
+      if (!inviteDraft.pickAvailable) return;
+      if (inviteDraftSelectedIds.has(invitePlacementPlayer.id)) return;
+      if (!inviteRolledSquad?.players.some((player) => player.id === invitePlacementPlayer.id)) return;
+    }
 
     if (target === 'startingXI') {
       if (typeof slotIndex !== 'number') return;
@@ -1058,7 +1145,7 @@ export default function MultiplayerLeague({
       }
     }
 
-    const baseDraft = fromPool
+    const baseDraft = fromPool || fromDraft
       ? inviteDraft
       : removeRosterPlayer(inviteDraft, invitePlacementPlayer.id);
     const currentIds = target === 'startingXI'
@@ -1070,8 +1157,10 @@ export default function MultiplayerLeague({
     }
 
     const nextDraft = addRosterPlayer(baseDraft, invitePlacementPlayer.id, target, slotIndex);
+    const nextTotal = inviteDraftTotal + (fromPool || fromDraft ? 1 : 0);
     setInviteDraft({
       ...nextDraft,
+      ...(fromDraft ? getInvitePickCompletionPatch(nextTotal) : {}),
       captainId: nextDraft.captainId ?? (target === 'startingXI' ? invitePlacementPlayer.id : null),
     });
     setInvitePlacement(null);
@@ -1083,8 +1172,9 @@ export default function MultiplayerLeague({
   };
 
   const importQuickTeamToInviteDraft = () => {
-    if (!formation || !tactic || !captainId || startingPlayers.length !== 11) {
-      setResultNotice('error', 'Aktarmak icin Hizli Oyna kadrosunda 11 oyuncu, dizilis, taktik ve kaptan gerekli.');
+    const quickStartingIds = selectedPlayers.map((player) => player?.id ?? '');
+    if (!formation || !tactic || !captainId || startingPlayers.length !== 11 || !quickStartingIds.includes(captainId)) {
+      setResultNotice('error', 'Hızlı Oyna kadron geçerli değil. Önce Hızlı Oyna’da 11 oyuncu, diziliş, taktik ve kaptan seç.');
       return;
     }
     setInviteDraft({
@@ -1872,7 +1962,7 @@ export default function MultiplayerLeague({
               )}
 
               {activeLeague.status === 'waiting' && !isLocalFriendLeague && (
-                <section className="grid gap-5 xl:grid-cols-[1fr_340px]">
+                <section className="space-y-5">
                   <div className="border-4 border-black bg-zinc-950 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
                     <div className="flex flex-col gap-3 border-b border-white/15 pb-4 md:flex-row md:items-center md:justify-between">
                       <div>
@@ -1890,8 +1980,7 @@ export default function MultiplayerLeague({
                         <button
                           type="button"
                           onClick={importQuickTeamToInviteDraft}
-                          disabled={!draftReady}
-                          className="game-button border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black disabled:opacity-35"
+                          className="game-button border-2 border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase text-white"
                         >
                           HÄ±zlÄ± Oyna Kadrosunu Aktar
                         </button>
@@ -1963,18 +2052,31 @@ export default function MultiplayerLeague({
                     )}
 
                     <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(280px,360px)_minmax(420px,1fr)]">
-                      <section className="border-2 border-white/15 bg-black/35 p-4">
+                      <DraftRollPanel
+                        draft={inviteRollDraft}
+                        rolledSquad={inviteRolledSquad}
+                        rolledTeam={inviteRolledTeam}
+                        rolledRating={inviteRolledTeamRating}
+                        selectedIds={inviteDraftSelectedIds}
+                        pendingPlayerId={invitePlacementPlayer?.id ?? null}
+                        activeTotal={inviteDraftTotal}
+                        teamById={teamById}
+                        onRoll={rollInviteSquad}
+                        onSelect={(playerId) => selectInvitePlayerForPlacement(playerId, 'draft')}
+                        onToggleAutoRoll={() => updateInviteDraft({ autoRoll: !inviteDraft.autoRoll })}
+                      />
+                      <section className="hidden">
                         <div className="border-b border-white/15 pb-3">
                           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-400">Oyuncu Havuzu</p>
                           <h4 className="text-lg font-black uppercase italic">Hızlı Oyna Kadrosu</h4>
                         </div>
                         <div className="mt-4 max-h-[620px] space-y-3 overflow-y-auto pr-1">
-                          {inviteAvailablePlayers.length === 0 && (
+                          {([] as Player[]).length === 0 && (
                             <p className="border-2 border-dashed border-white/15 p-4 text-xs font-black uppercase text-white/55">
                               Oyuncu havuzu için Hızlı Oyna kadrosu oluştur.
                             </p>
                           )}
-                          {inviteAvailablePlayers.map((player) => (
+                          {([] as Player[]).map((player) => (
                             <PremiumPlayerCard
                               key={player.id}
                               player={player}
