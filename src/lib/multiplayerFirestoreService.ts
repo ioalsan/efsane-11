@@ -42,6 +42,8 @@ import {
   type MultiplayerTeam,
   type MultiplayerTeamInput,
   type SimulateWeekResult,
+  type WeekUserProgress,
+  type WeekUserProgressStatus,
 } from './multiplayerService';
 import type { Player, SeasonDataset } from '@/types';
 
@@ -305,12 +307,20 @@ const readMatchReports = async (db: Firestore, leagueId: string) => {
     .sort((a, b) => a.week - b.week || a.fixtureId.localeCompare(b.fixtureId));
 };
 
+const readWeekProgress = async (db: Firestore, leagueId: string) => {
+  const snapshot = await getDocs(collection(db, 'leagues', leagueId, 'weekProgress'));
+  return snapshot.docs
+    .map((item) => item.data() as WeekUserProgress)
+    .sort((a, b) => a.week - b.week || a.teamId.localeCompare(b.teamId));
+};
+
 const hydrateLeague = async (db: Firestore, leagueId: string, data: Record<string, unknown>): Promise<MultiplayerLeague> => {
-  const [teams, fixtureRounds, standingRows, matchReports] = await Promise.all([
+  const [teams, fixtureRounds, standingRows, matchReports, weekProgress] = await Promise.all([
     readTeams(db, leagueId),
     readFixtures(db, leagueId),
     readStandings(db, leagueId),
     readMatchReports(db, leagueId),
+    readWeekProgress(db, leagueId),
   ]);
   const userTeams = teams.filter((team) => !team.isBot);
   const botTeams = teams.filter((team) => team.isBot);
@@ -336,6 +346,7 @@ const hydrateLeague = async (db: Firestore, leagueId: string, data: Record<strin
     currentWeek: Number(data.currentWeek ?? 0),
     latestFixtureId: typeof data.latestFixtureId === 'string' ? data.latestFixtureId : null,
     matchReports: matchReports.length > 0 ? matchReports : (Array.isArray(data.matchReports) ? data.matchReports as MultiplayerMatchReport[] : []),
+    weekProgress,
     createdAt: String(data.createdAt ?? now()),
     updatedAt: String(data.updatedAt ?? now()),
   };
@@ -377,6 +388,9 @@ const persistLeagueSubcollections = async (db: Firestore, league: MultiplayerLea
   });
   league.matchReports.forEach((report) => {
     writes.push((batch) => batch.set(doc(db, 'leagues', league.id, 'matchReports', report.fixtureId), clean(report)));
+  });
+  (league.weekProgress ?? []).forEach((progress) => {
+    writes.push((batch) => batch.set(doc(db, 'leagues', league.id, 'weekProgress', progress.id), clean(progress)));
   });
   await commitBatchedWrites(db, writes);
 };
@@ -427,6 +441,7 @@ export const createLeague = async ({
     currentWeek: 0,
     latestFixtureId: null,
     matchReports: [],
+    weekProgress: [],
     createdAt,
     updatedAt: createdAt,
   };
@@ -552,6 +567,7 @@ export const startLeague = async (
     currentWeek: 0,
     latestFixtureId: null,
     matchReports: [],
+    weekProgress: [],
   };
 
   const saved = await saveLeagueDoc(db, nextLeague, [user.uid, ...league.teams.map((team) => team.ownerId)]);
@@ -560,6 +576,57 @@ export const startLeague = async (
   });
   return saved;
 };
+
+const progressDoneStatuses: WeekUserProgressStatus[] = ['completed', 'skipped'];
+
+const getCurrentWeekProgress = (league: MultiplayerLeague) => (
+  (league.weekProgress ?? []).filter((progress) => progress.week === league.currentWeek + 1)
+);
+
+const isCurrentWeekReadyToAdvance = (league: MultiplayerLeague) => {
+  const progress = getCurrentWeekProgress(league);
+  return progress.length > 0 && progress.every((item) => progressDoneStatuses.includes(item.status));
+};
+
+const createWeekProgressEntries = (
+  league: MultiplayerLeague,
+  playedRound: CompetitionFixture[],
+): WeekUserProgress[] => {
+  const week = league.currentWeek + 1;
+  return league.teams
+    .map((team): WeekUserProgress | null => {
+      const fixture = playedRound.find((item) => item.homeTeamId === team.id || item.awayTeamId === team.id);
+      if (!fixture) return null;
+      return {
+        id: `week-${week}-${team.ownerId}`,
+        leagueId: league.id,
+        week,
+        userId: team.ownerId,
+        teamId: team.id,
+        matchId: fixture.id,
+        status: 'pending' as WeekUserProgressStatus,
+        startedAt: null,
+        completedAt: null,
+        skippedAt: null,
+      };
+    })
+    .filter((progress): progress is WeekUserProgress => Boolean(progress));
+};
+
+const buildWeekReports = (
+  week: number,
+  playedRound: CompetitionFixture[],
+  playedAt: string,
+): MultiplayerMatchReport[] => playedRound
+  .filter((fixture): fixture is CompetitionFixture & { result: MatchResult } => Boolean(fixture.result))
+  .map((fixture) => ({
+    fixtureId: fixture.id,
+    week,
+    homeTeamId: fixture.homeTeamId,
+    awayTeamId: fixture.awayTeamId,
+    result: fixture.result,
+    playedAt,
+  }));
 
 export const simulateWeek = async (
   leagueId: string,
@@ -576,11 +643,33 @@ export const simulateWeek = async (
     return { league: completed, playedRound: [] };
   }
 
+  const inviteWeekGenerated = currentRound.some((fixture) => Boolean(fixture.result));
+  if (inviteWeekGenerated) {
+    if (!isCurrentWeekReadyToAdvance(league)) {
+      throw new Error('Bu haftadaki kullanici maclari tamamlanmadi.');
+    }
+    const allTeams = [...league.teams, ...league.botTeams];
+    const nextWeek = league.currentWeek + 1;
+    const playedAt = now();
+    const nextLeague: MultiplayerLeague = {
+      ...league,
+      currentWeek: nextWeek,
+      latestFixtureId: currentRound.find((fixture) => fixture.result)?.id ?? league.latestFixtureId,
+      matchReports: [
+        ...league.matchReports.filter((report) => !currentRound.some((fixture) => fixture.id === report.fixtureId)),
+        ...buildWeekReports(league.currentWeek + 1, currentRound, playedAt),
+      ],
+      standings: createStandingRows(allTeams.map((team) => team.id), allTeams, league.fixtures),
+      status: nextWeek >= league.fixtures.length ? 'completed' : league.status,
+    };
+    const saved = await saveLeagueDoc(db, nextLeague);
+    return { league: saved, playedRound: currentRound };
+  }
+
   const playerById = getPlayerMap(dataset);
   const matchTeams = new Map(
     [...league.teams, ...league.botTeams].map((team) => [team.id, toCompetitionTeam(team, playerById)] as const),
   );
-  const playedAt = now();
   const playedRound = currentRound.map((fixture) => {
     if (fixture.result) return fixture;
     const home = matchTeams.get(fixture.homeTeamId);
@@ -598,34 +687,18 @@ export const simulateWeek = async (
   const nextFixtures = league.fixtures.map((round, index) => (
     index === league.currentWeek ? playedRound : round
   ));
-  const allTeams = [...league.teams, ...league.botTeams];
-  const nextWeek = league.currentWeek + 1;
-  const matchReports = [
-    ...league.matchReports.filter((report) => !playedRound.some((fixture) => fixture.id === report.fixtureId)),
-    ...playedRound
-      .filter((fixture): fixture is CompetitionFixture & { result: MatchResult } => Boolean(fixture.result))
-      .map((fixture) => ({
-        fixtureId: fixture.id,
-        week: league.currentWeek + 1,
-        homeTeamId: fixture.homeTeamId,
-        awayTeamId: fixture.awayTeamId,
-        result: fixture.result,
-        playedAt,
-      })),
-  ];
 
-  const nextLeague: MultiplayerLeague = {
+  const generatedLeague: MultiplayerLeague = {
     ...league,
     fixtures: nextFixtures,
-    currentWeek: nextWeek,
-    latestFixtureId: playedRound.find((fixture) => fixture.result)?.id ?? league.latestFixtureId,
-    matchReports,
-    standings: createStandingRows(allTeams.map((team) => team.id), allTeams, nextFixtures),
-    status: nextWeek >= league.fixtures.length ? 'completed' : league.status,
+    latestFixtureId: null,
+    weekProgress: [
+      ...(league.weekProgress ?? []).filter((progress) => progress.week !== league.currentWeek + 1),
+      ...createWeekProgressEntries(league, playedRound),
+    ],
   };
-
-  const saved = await saveLeagueDoc(db, nextLeague);
-  return { league: saved, playedRound };
+  const generated = await saveLeagueDoc(db, generatedLeague);
+  return { league: generated, playedRound };
 };
 
 export const getStandings = async (leagueId: string) => {
@@ -636,6 +709,31 @@ export const getStandings = async (leagueId: string) => {
     [...league.teams, ...league.botTeams],
     league.fixtures,
   );
+};
+
+export const updateWeekUserProgress = async (
+  leagueId: string,
+  status: WeekUserProgressStatus,
+) => {
+  const { db, user } = await getFirebaseOrThrow();
+  const league = await loadOnlineLeague(db, leagueId);
+  const progress = getCurrentWeekProgress(league).find((item) => item.userId === user.uid);
+  if (!progress) throw new Error('Bu hafta icin kullanici maci bulunamadi.');
+  const timestamp = now();
+  const nextProgress: WeekUserProgress = {
+    ...progress,
+    status,
+    startedAt: progress.startedAt ?? timestamp,
+    completedAt: status === 'completed' || status === 'skipped' ? timestamp : progress.completedAt,
+    skippedAt: status === 'skipped' ? timestamp : progress.skippedAt ?? null,
+  };
+  await setDoc(doc(db, 'leagues', leagueId, 'weekProgress', progress.id), clean(nextProgress), { merge: true });
+  await updateDoc(leagueRef(db, leagueId), { updatedAt: timestamp });
+  return {
+    ...league,
+    weekProgress: (league.weekProgress ?? []).map((item) => (item.id === progress.id ? nextProgress : item)),
+    updatedAt: timestamp,
+  };
 };
 
 export const subscribeOnlineLeagues = (
@@ -669,7 +767,7 @@ export const subscribeOnlineLeagues = (
 
   const watchLeagueSubcollections = (leagueId: string) => {
     if (subcollectionUnsubscribers.has(leagueId)) return;
-    const subcollections = ['teams', 'fixtures', 'standings', 'matchReports'];
+    const subcollections = ['teams', 'fixtures', 'standings', 'matchReports', 'weekProgress'];
     const unsubscribers = subcollections.map((name) => onSnapshot(
       collection(client.db, 'leagues', leagueId, name),
       () => {

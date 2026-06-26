@@ -2,8 +2,82 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function leagueDoc(leagueId) {
+      return get(/databases/$(database)/documents/leagues/$(leagueId));
+    }
+
+    function isLeagueOwner(leagueId) {
+      return signedIn() && leagueDoc(leagueId).data.ownerId == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && userId == request.auth.uid;
+    }
+
+    match /leagues/{leagueId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if signedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'memberIds',
+          'teamIds',
+          'updatedAt'
+        ])
+      );
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /teams/{teamId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && (
+          isLeagueOwner(leagueId)
+          || request.resource.data.ownerId == request.auth.uid
+        );
+        allow delete: if isLeagueOwner(leagueId);
+      }
+
+      match /fixtures/{fixtureId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isLeagueOwner(leagueId);
+      }
+
+      match /standings/{teamId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isLeagueOwner(leagueId);
+      }
+
+      match /matchReports/{matchId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isLeagueOwner(leagueId);
+      }
+
+      match /weekProgress/{progressId} {
+        allow read: if signedIn();
+        allow create: if isLeagueOwner(leagueId);
+        allow update: if signedIn() && (
+          isLeagueOwner(leagueId)
+          || (
+            resource.data.userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.leagueId == resource.data.leagueId
+            && request.resource.data.week == resource.data.week
+            && request.resource.data.teamId == resource.data.teamId
+            && request.resource.data.matchId == resource.data.matchId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status',
+              'startedAt',
+              'completedAt',
+              'skippedAt'
+            ])
+          )
+        );
+        allow delete: if isLeagueOwner(leagueId);
+      }
     }
   }
 }

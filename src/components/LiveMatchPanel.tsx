@@ -79,6 +79,7 @@ export default function LiveMatchPanel({
   homeName,
   awayName,
   onComplete,
+  onSkip,
   simulationMode = 'quick',
 }: {
   fixture: CompetitionFixture;
@@ -86,6 +87,7 @@ export default function LiveMatchPanel({
   homeName: string;
   awayName: string;
   onComplete: () => void;
+  onSkip?: () => void;
   simulationMode?: 'quick' | 'manager';
 }) {
   const [minute, setMinute] = useState(0);
@@ -309,6 +311,7 @@ export default function LiveMatchPanel({
     skipRef.current = true;
     speedRef.current = 'fast';
     setSpeed('fast');
+    onSkip?.();
   };
 
   const statProgress = phase === 'finished' || phase === 'penalties'

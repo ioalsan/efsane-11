@@ -12,6 +12,7 @@ import {
   simulateWeek,
   startLeague,
   startLocalFriendLeague,
+  updateWeekUserProgress,
 } from '../src/lib/multiplayerService';
 import {
   DEFAULT_COMPETITION_ID,
@@ -181,6 +182,54 @@ test('invite league waits for the selected user team count before starting', () 
   const saved = saveTeamToLeague(league.id, input);
 
   assert.throws(() => startLeague(saved.id, 'owner-1', dataset), /2 kullanici takimi gerekli/);
+});
+
+test('invite league waits for every user match progress before advancing the week', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .filter((team) => getTeamPlayers(team.id, dataset).length >= 18)
+    .slice(0, 2);
+  assert.equal(sourceTeams.length, 2);
+
+  let league = createLeague({
+    name: 'Progress Ligi',
+    ownerId: 'owner-1',
+    maxUsers: 2,
+    powerLimit: 'free',
+  });
+
+  sourceTeams.forEach((sourceTeam, index) => {
+    const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+    league = saveTeamToLeague(league.id, buildMultiplayerTeamInput({
+      ownerId: `user-${index + 1}`,
+      teamName: `Progress ${index + 1}`,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0].id,
+      startingPlayers: players.slice(0, 11),
+      substitutes: players.slice(11, 18),
+      reserves: [],
+    }));
+  });
+
+  const started = startLeague(league.id, 'owner-1', dataset);
+  const generated = simulateWeek(started.id, dataset).league;
+
+  assert.equal(generated.currentWeek, 0);
+  assert.equal(generated.weekProgress.length, 2);
+  assert.ok(generated.fixtures[0].every((fixture) => fixture.result));
+  assert.equal(generated.standings.every((row) => row.played === 0), true);
+
+  updateWeekUserProgress(generated.id, 'user-1', 'skipped');
+  assert.throws(() => simulateWeek(generated.id, dataset), /kullanici maclari tamamlanmadi/);
+
+  updateWeekUserProgress(generated.id, 'user-2', 'completed');
+  const advanced = simulateWeek(generated.id, dataset).league;
+
+  assert.equal(advanced.currentWeek, 1);
+  assert.equal(advanced.matchReports.length, generated.fixtures[0].length);
+  assert.equal(advanced.standings.some((row) => row.played > 0), true);
 });
 
 test('local friend league replaces the weakest real teams and creates a full 18-team season', () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Copy,
   Crown,
@@ -23,9 +23,11 @@ import {
   createLeague,
   createLocalFriendLeague,
   getLeagueHighlights,
+  getCurrentWeekProgress,
   getPowerLimitCap,
   getRealTeamReplacementPlan,
   getTeamDisplayName,
+  isCurrentWeekReadyToAdvance,
   joinLeague,
   listLeagues,
   consumeMultiplayerMigrationNotice,
@@ -35,12 +37,14 @@ import {
   startLocalFriendLeague,
   startLeague,
   buildMultiplayerTeamInput,
+  updateWeekUserProgress,
   type MultiplayerLeague as MultiplayerLeagueSave,
   type MultiplayerMaxUsers,
   type MultiplayerPowerLimit,
   type MultiplayerStandingRow,
   type PlayerSlot,
   type PlayerSlotTeamInput,
+  type WeekUserProgress,
 } from '@/lib/multiplayerService';
 import {
   createLeague as createOnlineLeague,
@@ -49,6 +53,7 @@ import {
   simulateWeek as simulateOnlineWeek,
   startLeague as startOnlineLeague,
   subscribeOnlineLeagues,
+  updateWeekUserProgress as updateOnlineWeekUserProgress,
 } from '@/lib/multiplayerFirestoreService';
 import {
   isFirebaseConfigured,
@@ -98,6 +103,13 @@ const statusLabels: Record<MultiplayerLeagueSave['status'], string> = {
   waiting: 'Bekleme',
   active: 'Aktif',
   completed: 'Tamamlandı',
+};
+
+const weekProgressLabels: Record<WeekUserProgress['status'], string> = {
+  pending: 'Bekliyor',
+  watching: 'İzleniyor',
+  completed: 'Tamamlandı',
+  skipped: 'Sonuca atlandı',
 };
 
 type NoticeTone = 'info' | 'success' | 'error';
@@ -397,6 +409,18 @@ const isPositionCompatible = (player: Player, allowedPosition: string) => {
   return Boolean(normalizedAllowedPosition && positions.has(normalizedAllowedPosition));
 };
 
+const hasOpenCompatibleStartingSlot = (
+  draft: Pick<SlotDraft, 'startingXI'> | Pick<InviteDraft, 'startingXI'>,
+  player: Player,
+  formationId: FormationType,
+) => {
+  const slots = normalizeStartingSlots(draft.startingXI);
+  const formationConfig = FORMATIONS.find((item) => item.id === formationId) ?? FORMATIONS[0];
+  return formationConfig.positions.some((slot) => (
+    !slots[slot.index] && isPositionCompatible(player, slot.allowedPosition)
+  ));
+};
+
 export default function MultiplayerLeague({
   onBackToQuick,
   focusMode = 'friends',
@@ -411,6 +435,16 @@ export default function MultiplayerLeague({
   const captainId = useTeamStore((state) => state.captainId);
   const squadName = useTeamStore((state) => state.squadName);
   const competitionId = useTeamStore((state) => state.competitionId);
+  const activeDraftPanelRef = useRef<HTMLDivElement | null>(null);
+  const activePitchRef = useRef<HTMLDivElement | null>(null);
+  const activeSaveRef = useRef<HTMLDivElement | null>(null);
+  const inviteDraftPanelRef = useRef<HTMLDivElement | null>(null);
+  const invitePitchRef = useRef<HTMLDivElement | null>(null);
+  const inviteSaveRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToElement = (element: HTMLElement | null) => {
+    element?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+  };
 
   const [user, setUser] = useState<LocalAuthUser | null>(null);
   const [managerName, setManagerName] = useState('Canlı11 Menajeri');
@@ -426,9 +460,10 @@ export default function MultiplayerLeague({
   const [inviteCode, setInviteCode] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [liveFixture, setLiveFixture] = useState<CompetitionFixture | null>(null);
+  const [liveProgressId, setLiveProgressId] = useState<string | null>(null);
+  const [liveSkipped, setLiveSkipped] = useState(false);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
   const [slotDrafts, setSlotDrafts] = useState<Record<string, SlotDraft>>({});
-  const [userMatchQueue, setUserMatchQueue] = useState<CompetitionFixture[]>([]);
   const [pendingPlacementPlayerId, setPendingPlacementPlayerId] = useState<string | null>(null);
   const [pendingPlacementSource, setPendingPlacementSource] = useState<PlacementSelection | null>(null);
   const [inviteDraft, setInviteDraft] = useState<InviteDraft>(() => createEmptyInviteDraft());
@@ -570,6 +605,10 @@ export default function MultiplayerLeague({
   );
   const isOwner = Boolean(activeLeague && user && activeLeague.ownerId === user.id);
   const currentRound = activeLeague?.fixtures[activeLeague.currentWeek] ?? [];
+  const currentWeekProgress = activeLeague ? getCurrentWeekProgress(activeLeague) : [];
+  const currentWeekGenerated = currentRound.some((fixture) => Boolean(fixture.result));
+  const currentWeekReadyToAdvance = activeLeague ? isCurrentWeekReadyToAdvance(activeLeague) : false;
+  const hideCurrentWeekResults = activeLeague?.mode === 'invite' && currentWeekGenerated && !currentWeekReadyToAdvance;
   const flatFixtures = activeLeague?.fixtures.flat() ?? [];
   const latestFixture = activeLeague?.latestFixtureId
     ? flatFixtures.find((fixture) => fixture.id === activeLeague.latestFixtureId) ?? null
@@ -735,6 +774,10 @@ export default function MultiplayerLeague({
     substitutes: inviteDraft.substitutes,
     reserves: [],
   }), [inviteDraft]);
+  const canSelectInviteDraftPlayer = (player: Player) => (
+    getRosterCount(inviteDraft.startingXI) === 11 ||
+    hasOpenCompatibleStartingSlot(invitePitchDraft, player, invitePitchDraft.formation)
+  );
   const inviteRollDraft = useMemo<SlotDraft>(() => ({
     displayName: managerName,
     teamName: inviteDraft.teamName,
@@ -842,6 +885,11 @@ export default function MultiplayerLeague({
     () => FORMATIONS.find((item) => item.id === activeDraft?.formation) ?? FORMATIONS[0],
     [activeDraft?.formation],
   );
+  const canSelectActiveDraftPlayer = (player: Player) => (
+    !activeDraft ||
+    getRosterCount(activeDraft.startingXI) === 11 ||
+    hasOpenCompatibleStartingSlot(activeDraft, player, activeDraft.formation)
+  );
   const pendingPlacementPlayer = (() => {
     if (!pendingPlacementPlayerId || !pendingPlacementSource || pendingPlacementSource.playerId !== pendingPlacementPlayerId) {
       return null;
@@ -860,6 +908,14 @@ export default function MultiplayerLeague({
     () => activeDraft ? getPositionWarnings(getDraftPlayers(draftPlayerIds(activeDraft), playerById)) : [],
     [activeDraft, playerById],
   );
+
+  useEffect(() => {
+    if (activeSlotReadyToSave) scrollToElement(activeSaveRef.current);
+  }, [activeSlotReadyToSave]);
+
+  useEffect(() => {
+    if (teamPreview) scrollToElement(inviteSaveRef.current);
+  }, [teamPreview]);
 
   const setResultNotice = (tone: NoticeTone, text: string) => {
     setNotice({ tone, text });
@@ -893,7 +949,6 @@ export default function MultiplayerLeague({
       refreshLeagues(league.id);
       setActiveLeagueId(league.id);
       setActiveSlotId(league.playerSlots[0]?.id ?? null);
-      setUserMatchQueue([]);
       setSlotDrafts({});
       setResultNotice('success', `${league.name} için ${league.playerSlots.length} oyunculu arkadaş ligi oluşturuldu.`);
     } catch (error) {
@@ -976,8 +1031,14 @@ export default function MultiplayerLeague({
     }
     if (activeDraftSelectedIds.has(playerId)) return;
     if (!activeRolledSquad?.players.some((player) => player.id === playerId)) return;
+    const player = playerById.get(playerId);
+    if (player && !canSelectActiveDraftPlayer(player)) {
+      setResultNotice('error', 'Bu mevki dolu. Once eksik ilk 11 mevkilerini tamamla.');
+      return;
+    }
     setPendingPlacementPlayerId(playerId);
     setPendingPlacementSource({ playerId, source: 'draft' });
+    scrollToElement(activePitchRef.current);
   };
 
   const placePendingPlayer = (target: RosterTarget, slotIndex?: number) => {
@@ -1024,6 +1085,12 @@ export default function MultiplayerLeague({
         });
       setPendingPlacementPlayerId(null);
       setPendingPlacementSource(null);
+      scrollToElement(activeDraftPanelRef.current);
+      return;
+    }
+
+    if (target === 'substitutes' && getRosterCount(activeDraft.startingXI) < 11) {
+      setResultNotice('error', 'Once ilk 11 tamamlanmali.');
       return;
     }
 
@@ -1044,6 +1111,7 @@ export default function MultiplayerLeague({
       : nextDraft);
     setPendingPlacementPlayerId(null);
     setPendingPlacementSource(null);
+    scrollToElement(activeDraftPanelRef.current);
   };
 
   const addPlayerToDraft = (playerId: string, target: RosterTarget) => {
@@ -1143,10 +1211,16 @@ export default function MultiplayerLeague({
       if (!inviteDraft.pickAvailable) return;
       if (inviteDraftSelectedIds.has(playerId)) return;
       if (!inviteRolledSquad?.players.some((player) => player.id === playerId)) return;
+      const player = playerById.get(playerId);
+      if (player && !canSelectInviteDraftPlayer(player)) {
+        setResultNotice('error', 'Bu mevki dolu. Once eksik ilk 11 mevkilerini tamamla.');
+        return;
+      }
     }
     const fromRoster = source !== 'pool' && source !== 'draft';
     if (fromRoster && !inviteDraftSelectedIds.has(playerId)) return;
     setInvitePlacement({ playerId, source, slotIndex });
+    if (source === 'draft') scrollToElement(invitePitchRef.current);
   };
 
   const placeInvitePlayer = (target: RosterTarget, slotIndex?: number) => {
@@ -1176,6 +1250,11 @@ export default function MultiplayerLeague({
       }
     }
 
+    if (target === 'substitutes' && getRosterCount(inviteDraft.startingXI) < 11) {
+      setResultNotice('error', 'Once ilk 11 tamamlanmali.');
+      return;
+    }
+
     const baseDraft = fromPool || fromDraft
       ? inviteDraft
       : removeRosterPlayer(inviteDraft, invitePlacementPlayer.id);
@@ -1196,6 +1275,7 @@ export default function MultiplayerLeague({
       captainId: nextDraft.captainId ?? (target === 'startingXI' ? invitePlacementPlayer.id : null),
     });
     setInvitePlacement(null);
+    scrollToElement(inviteDraftPanelRef.current);
   };
 
   const removePlayerFromInviteDraft = (playerId: string) => {
@@ -1293,7 +1373,6 @@ export default function MultiplayerLeague({
         const league = await startOnlineLeague(activeLeague.id, dataset);
         refreshOnlineLeague(league);
         setActiveLeagueId(league.id);
-        setUserMatchQueue([]);
         setResultNotice('success', `Sezon basladi. ${league.botTeams.length} gercek takim lige dahil edildi.`);
         return;
       }
@@ -1302,7 +1381,6 @@ export default function MultiplayerLeague({
         : startLeague(activeLeague.id, user.id, dataset);
       refreshLeagues(league.id);
       setActiveLeagueId(league.id);
-      setUserMatchQueue([]);
       setResultNotice('success', `Sezon başladı. ${league.botTeams.length} gerçek takım lige dahil edildi.`);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
@@ -1315,25 +1393,67 @@ export default function MultiplayerLeague({
       const result = isOnlineInviteLeague
         ? await simulateOnlineWeek(activeLeague.id, dataset)
         : simulateWeek(activeLeague.id, dataset);
-      const resultHumanIds = new Set(result.league.teams.map((team) => team.id));
-      const userFixtures = result.playedRound.filter((fixture) => (
-        resultHumanIds.has(fixture.homeTeamId) || resultHumanIds.has(fixture.awayTeamId)
-      ));
-      const userFixture = ownedTeam
-        ? userFixtures.find((fixture) => fixture.homeTeamId === ownedTeam.id || fixture.awayTeamId === ownedTeam.id)
-        : userFixtures[0] ?? null;
       if (isOnlineInviteLeague) {
         refreshOnlineLeague(result.league);
       } else {
         refreshLeagues(result.league.id);
       }
       setActiveLeagueId(result.league.id);
-      setUserMatchQueue(userFixtures);
-      if (!isLocalFriendLeague && userFixture?.result) {
-        setLiveFixture(userFixture);
-      } else {
-        setResultNotice('success', `${result.league.currentWeek}. hafta simüle edildi. ${userFixtures.length} kullanıcı maçı izlenebilir.`);
-      }
+      setLiveFixture(null);
+      setLiveProgressId(null);
+      const generatedOnly = result.league.currentWeek === activeLeague.currentWeek;
+      setResultNotice('success', generatedOnly
+        ? `${activeLeague.currentWeek + 1}. hafta basladi. Kullanici maclari izlenebilir.`
+        : `${result.league.currentWeek}. hafta tamamlandi.`);
+    } catch (error) {
+      setResultNotice('error', getErrorMessage(error));
+    }
+  };
+
+  const updateCurrentUserWeekProgress = async (status: WeekUserProgress['status']) => {
+    if (!activeLeague || !user) return null;
+    const league = isOnlineInviteLeague
+      ? await updateOnlineWeekUserProgress(activeLeague.id, status)
+      : updateWeekUserProgress(activeLeague.id, user.id, status);
+    if (isOnlineInviteLeague) {
+      refreshOnlineLeague(league);
+    } else {
+      refreshLeagues(league.id);
+    }
+    setActiveLeagueId(league.id);
+    return league;
+  };
+
+  const handleWatchMyMatch = async (progress: WeekUserProgress) => {
+    if (!activeLeague) return;
+    const fixture = currentRound.find((item) => item.id === progress.matchId);
+    if (!fixture?.result) return;
+    try {
+      await updateCurrentUserWeekProgress('watching');
+      setLiveProgressId(progress.id);
+      setLiveSkipped(false);
+      setLiveFixture(fixture);
+    } catch (error) {
+      setResultNotice('error', getErrorMessage(error));
+    }
+  };
+
+  const skipLiveMatch = async () => {
+    if (liveSkipped) return;
+    try {
+      setLiveSkipped(true);
+      await updateCurrentUserWeekProgress('skipped');
+    } catch (error) {
+      setResultNotice('error', getErrorMessage(error));
+    }
+  };
+
+  const completeLiveMatch = async () => {
+    try {
+      if (!liveSkipped) await updateCurrentUserWeekProgress('completed');
+      setLiveFixture(null);
+      setLiveProgressId(null);
+      setLiveSkipped(false);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
     }
@@ -1576,7 +1696,6 @@ export default function MultiplayerLeague({
                   onClick={() => {
                     setActiveLeagueId(league.id);
                     setLiveFixture(null);
-                    setUserMatchQueue([]);
                     setActiveSlotId(league.playerSlots?.find((slot) => !slot.ready)?.id ?? league.playerSlots?.[0]?.id ?? null);
                   }}
                   className={`game-button border-2 border-black p-3 text-left text-xs font-black uppercase ${activeLeague?.id === league.id ? 'bg-yellow-400 text-black' : 'bg-zinc-100 text-black'}`}
@@ -1661,7 +1780,7 @@ export default function MultiplayerLeague({
                           <DraftCounter label="Kimya" value={activeSlotPreview?.chemistry ?? '-'} />
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-[120px_160px] xl:grid-cols-1">
+                      <div ref={activeSaveRef} className="grid grid-cols-2 gap-2 sm:grid-cols-[120px_160px] xl:grid-cols-1">
                         <DraftCounter label="Takim gucu" value={activeSlotPreview?.rating ?? '-'} strong />
                         <button
                           type="button"
@@ -1732,34 +1851,39 @@ export default function MultiplayerLeague({
                   </section>
 
                   <div className="grid gap-5 xl:grid-cols-[360px_minmax(320px,420px)_minmax(430px,1fr)]">
-                    <FriendPitchBoard
-                      draft={activeDraft}
-                      playerById={playerById}
-                      pendingPlayer={pendingPlacementPlayer}
-                      selectedPlayerId={pendingPlacementPlayer?.id ?? null}
-                      captainId={activeDraft.captainId}
-                      teamRating={activeSlotPreview?.rating ?? '-'}
-                      onCaptain={(playerId) => updateActiveDraft({ captainId: playerId })}
-                      onSelect={selectRosterPlayerForPlacement}
-                      onPlace={placePendingPlayer}
-                      onRemove={removePlayerFromDraft}
-                    />
+                    <div ref={activePitchRef}>
+                      <FriendPitchBoard
+                        draft={activeDraft}
+                        playerById={playerById}
+                        pendingPlayer={pendingPlacementPlayer}
+                        selectedPlayerId={pendingPlacementPlayer?.id ?? null}
+                        captainId={activeDraft.captainId}
+                        teamRating={activeSlotPreview?.rating ?? '-'}
+                        onCaptain={(playerId) => updateActiveDraft({ captainId: playerId })}
+                        onSelect={selectRosterPlayerForPlacement}
+                        onPlace={placePendingPlayer}
+                        onRemove={removePlayerFromDraft}
+                      />
+                    </div>
 
-                    <DraftRollPanel
-                      draft={activeDraft}
-                      rolledSquad={activeRolledSquad}
-                      rolledTeam={activeRolledTeam}
-                      rolledRating={activeRolledTeamRating}
-                      selectedIds={activeDraftSelectedIds}
-                      pendingPlayerId={pendingPlacementPlayer?.id ?? null}
-                      activeTotal={activeDraftTotal}
-                      seenTeamCount={activeDraftSeenTeamCount}
-                      teamPoolCount={draftSquads.length}
-                      teamById={teamById}
-                      onRoll={rollActiveSquad}
-                      onSelect={selectDraftPlayer}
-                      onToggleAutoRoll={() => updateActiveDraft({ autoRoll: !activeDraft.autoRoll })}
-                    />
+                    <div ref={activeDraftPanelRef}>
+                      <DraftRollPanel
+                        draft={activeDraft}
+                        rolledSquad={activeRolledSquad}
+                        rolledTeam={activeRolledTeam}
+                        rolledRating={activeRolledTeamRating}
+                        selectedIds={activeDraftSelectedIds}
+                        pendingPlayerId={pendingPlacementPlayer?.id ?? null}
+                        activeTotal={activeDraftTotal}
+                        seenTeamCount={activeDraftSeenTeamCount}
+                        teamPoolCount={draftSquads.length}
+                        teamById={teamById}
+                        isPlayerDisabled={(player) => !canSelectActiveDraftPlayer(player)}
+                        onRoll={rollActiveSquad}
+                        onSelect={selectDraftPlayer}
+                        onToggleAutoRoll={() => updateActiveDraft({ autoRoll: !activeDraft.autoRoll })}
+                      />
+                    </div>
 
                     <SelectedPlacementPanel
                       player={pendingPlacementPlayer}
@@ -2025,7 +2149,7 @@ export default function MultiplayerLeague({
                         <p className="text-[10px] font-black uppercase tracking-[0.2em] text-green-400">Takımını Kaydet</p>
                         <h3 className="text-2xl font-black uppercase italic">{inviteDraft.teamName.trim() || squadName}</h3>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div ref={inviteSaveRef} className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={onBackToQuick}
@@ -2108,21 +2232,24 @@ export default function MultiplayerLeague({
                     )}
 
                     <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(280px,360px)_minmax(420px,1fr)]">
-                      <DraftRollPanel
-                        draft={inviteRollDraft}
-                        rolledSquad={inviteRolledSquad}
-                        rolledTeam={inviteRolledTeam}
-                        rolledRating={inviteRolledTeamRating}
-                        selectedIds={inviteDraftSelectedIds}
-                        pendingPlayerId={invitePlacementPlayer?.id ?? null}
-                        activeTotal={inviteDraftTotal}
-                        seenTeamCount={inviteDraftSeenTeamCount}
-                        teamPoolCount={draftSquads.length}
-                        teamById={teamById}
-                        onRoll={rollInviteSquad}
-                        onSelect={(playerId) => selectInvitePlayerForPlacement(playerId, 'draft')}
-                        onToggleAutoRoll={() => updateInviteDraft({ autoRoll: !inviteDraft.autoRoll })}
-                      />
+                      <div ref={inviteDraftPanelRef}>
+                        <DraftRollPanel
+                          draft={inviteRollDraft}
+                          rolledSquad={inviteRolledSquad}
+                          rolledTeam={inviteRolledTeam}
+                          rolledRating={inviteRolledTeamRating}
+                          selectedIds={inviteDraftSelectedIds}
+                          pendingPlayerId={invitePlacementPlayer?.id ?? null}
+                          activeTotal={inviteDraftTotal}
+                          seenTeamCount={inviteDraftSeenTeamCount}
+                          teamPoolCount={draftSquads.length}
+                          teamById={teamById}
+                          isPlayerDisabled={(player) => !canSelectInviteDraftPlayer(player)}
+                          onRoll={rollInviteSquad}
+                          onSelect={(playerId) => selectInvitePlayerForPlacement(playerId, 'draft')}
+                          onToggleAutoRoll={() => updateInviteDraft({ autoRoll: !inviteDraft.autoRoll })}
+                        />
+                      </div>
                       <section className="hidden">
                         <div className="border-b border-white/15 pb-3">
                           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-400">Oyuncu Havuzu</p>
@@ -2155,18 +2282,20 @@ export default function MultiplayerLeague({
                         canPlace={Boolean(invitePlacementPlayer)}
                       />
 
-                      <FriendPitchBoard
-                        draft={invitePitchDraft}
-                        playerById={playerById}
-                        pendingPlayer={invitePlacementPlayer}
-                        selectedPlayerId={invitePlacementPlayer?.id ?? null}
-                        captainId={inviteDraft.captainId}
-                        teamRating={teamPreview?.rating ?? getAverageRating(inviteStartingPlayers) ?? '-'}
-                        onCaptain={(playerId) => updateInviteDraft({ captainId: playerId })}
-                        onSelect={selectInvitePlayerForPlacement}
-                        onPlace={placeInvitePlayer}
-                        onRemove={removePlayerFromInviteDraft}
-                      />
+                      <div ref={invitePitchRef}>
+                        <FriendPitchBoard
+                          draft={invitePitchDraft}
+                          playerById={playerById}
+                          pendingPlayer={invitePlacementPlayer}
+                          selectedPlayerId={invitePlacementPlayer?.id ?? null}
+                          captainId={inviteDraft.captainId}
+                          teamRating={teamPreview?.rating ?? getAverageRating(inviteStartingPlayers) ?? '-'}
+                          onCaptain={(playerId) => updateInviteDraft({ captainId: playerId })}
+                          onSelect={selectInvitePlayerForPlacement}
+                          onPlace={placeInvitePlayer}
+                          onRemove={removePlayerFromInviteDraft}
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -2214,10 +2343,15 @@ export default function MultiplayerLeague({
                         <button
                           type="button"
                           onClick={handleSimulateWeek}
-                          disabled={activeLeague.status !== 'active' || Boolean(liveFixture) || (isOnlineInviteLeague && !isOwner)}
+                          disabled={
+                            activeLeague.status !== 'active'
+                            || Boolean(liveFixture)
+                            || (isOnlineInviteLeague && !isOwner)
+                            || (currentWeekGenerated && !currentWeekReadyToAdvance)
+                          }
                           className="game-button flex items-center gap-2 border-4 border-black bg-green-600 px-5 py-4 text-sm font-black uppercase text-white disabled:opacity-35"
                         >
-                          <Play size={18} fill="currentColor" /> Haftayı Simüle Et
+                          <Play size={18} fill="currentColor" /> {currentWeekGenerated ? 'Sonraki Haftaya Geç' : 'Haftayı Başlat'}
                         </button>
                       </div>
                       <div className="mt-4 grid gap-3">
@@ -2236,8 +2370,14 @@ export default function MultiplayerLeague({
                             fixture={fixture}
                             teamNameOf={teamNameOf}
                             highlightTeamIds={humanTeamIds}
+                            hideResult={hideCurrentWeekResults}
                           />
                         ))}
+                        {hideCurrentWeekResults && (
+                          <p className="border-2 border-dashed border-yellow-500 bg-yellow-50 p-4 text-xs font-black uppercase text-yellow-800">
+                            Hafta sonuclari, kullanici maclari tamamlaninca puan tablosuna yansiyacak.
+                          </p>
+                        )}
                       </div>
                     </section>
 
@@ -2252,7 +2392,7 @@ export default function MultiplayerLeague({
                         <MiniStat dark label="Gol" value={highlights?.topScoring?.goalsFor ?? '-'} />
                         <MiniStat dark label="Savunma" value={highlights?.bestDefense?.teamName ?? '-'} />
                       </div>
-                      {latestFixture?.result && (
+                      {latestFixture?.result && !hideCurrentWeekResults && (
                         <div className="mt-4">
                           <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-green-400">Son Maç Raporu</p>
                           <FixtureRow fixture={latestFixture} teamNameOf={teamNameOf} highlightTeamIds={humanTeamIds} dark />
@@ -2261,26 +2401,54 @@ export default function MultiplayerLeague({
                     </section>
                   </div>
 
-                  {userMatchQueue.length > 0 && (
+                  {currentWeekProgress.length > 0 && activeLeague.status === 'active' && (
                     <section className="border-4 border-black bg-yellow-300 p-5 text-black shadow-[6px_6px_0px_0px_#000]">
                       <div className="mb-4 flex items-center gap-2 border-b-2 border-black pb-3">
                         <Eye size={18} />
-                        <h3 className="text-xl font-black uppercase italic">Kullanıcı Maçını İzle</h3>
+                        <h3 className="text-xl font-black uppercase italic">Haftanın Kullanıcı Maçları</h3>
                       </div>
                       <div className="grid gap-3">
-                        {userMatchQueue.map((fixture) => (
-                          <button
-                            key={fixture.id}
-                            type="button"
-                            onClick={() => setLiveFixture(fixture)}
-                            className="game-button grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3 border-2 border-black bg-white p-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
-                          >
-                            <span className="truncate text-right">{teamNameOf(fixture.homeTeamId)}</span>
-                            <span className="text-xl tabular-nums">{finalScore(fixture) ? `${finalScore(fixture)?.home} - ${finalScore(fixture)?.away}` : 'VS'}</span>
-                            <span className="truncate text-left">{teamNameOf(fixture.awayTeamId)}</span>
-                            <Eye size={16} />
-                          </button>
-                        ))}
+                        {currentWeekProgress.map((progress) => {
+                          const fixture = currentRound.find((item) => item.id === progress.matchId) ?? null;
+                          const isMine = progress.userId === user?.id;
+                          const done = progress.status === 'completed' || progress.status === 'skipped';
+                          return (
+                            <div
+                              key={progress.id}
+                              className={`grid gap-3 border-2 border-black p-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_#000] md:grid-cols-[1fr_auto] md:items-center ${isMine ? 'bg-white' : 'bg-yellow-100'}`}
+                            >
+                              <div>
+                                <p className="text-[10px] opacity-60">{teamNameOf(progress.teamId)} / {weekProgressLabels[progress.status]}</p>
+                                <p className="mt-1 text-sm">
+                                  {fixture ? `${teamNameOf(fixture.homeTeamId)} vs ${teamNameOf(fixture.awayTeamId)}` : 'Mac bekleniyor'}
+                                </p>
+                                {done && fixture && !hideCurrentWeekResults && (
+                                  <p className="mt-1 text-lg tabular-nums">{finalScore(fixture)?.home} - {finalScore(fixture)?.away}</p>
+                                )}
+                              </div>
+                              {isMine && fixture?.result ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleWatchMyMatch(progress)}
+                                  disabled={done || Boolean(liveFixture)}
+                                  className="game-button flex items-center justify-center gap-2 border-2 border-black bg-black px-4 py-3 text-[10px] font-black uppercase text-white disabled:opacity-35"
+                                >
+                                  <Eye size={16} /> {done ? 'Sonuç Görüldü' : 'Maçımı İzle'}
+                                </button>
+                              ) : (
+                                <span className="text-[10px] opacity-60">{done ? 'Tamamlandi' : 'Bekleniyor'}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {!currentWeekReadyToAdvance && (
+                          <p className="border-2 border-dashed border-black/30 bg-white/45 p-3 text-[10px] font-black uppercase">
+                            {currentWeekProgress
+                              .filter((progress) => progress.status !== 'completed' && progress.status !== 'skipped')
+                              .map((progress) => teamNameOf(progress.teamId))
+                              .join(', ')} macini tamamlamasi bekleniyor.
+                          </p>
+                        )}
                       </div>
                     </section>
                   )}
@@ -2291,7 +2459,13 @@ export default function MultiplayerLeague({
                       result={liveFixture.result}
                       homeName={teamNameOf(liveFixture.homeTeamId)}
                       awayName={teamNameOf(liveFixture.awayTeamId)}
-                      onComplete={() => setLiveFixture(null)}
+                      onComplete={() => {
+                        if (liveProgressId) void completeLiveMatch();
+                        else setLiveFixture(null);
+                      }}
+                      onSkip={() => {
+                        if (liveProgressId) void skipLiveMatch();
+                      }}
                       simulationMode="manager"
                     />
                   )}
@@ -2301,6 +2475,11 @@ export default function MultiplayerLeague({
                       <Users className="text-green-700" size={18} />
                       <h3 className="text-2xl font-black uppercase italic">Puan Tablosu</h3>
                     </div>
+                    {hideCurrentWeekResults && (
+                      <p className="mb-4 border-2 border-dashed border-black/25 bg-yellow-50 p-4 text-xs font-black uppercase text-yellow-800">
+                        Hafta sonuclari tamamlaninca puan tablosu guncellenecek.
+                      </p>
+                    )}
                     <LeagueTable rows={activeLeague.standings} highlightTeamIds={humanTeamIds} />
                   </section>
                 </section>
@@ -2441,7 +2620,9 @@ function PremiumPlayerCard({
       ? 'border-yellow-400 bg-yellow-400/15'
       : selected
         ? 'border-white/10 bg-black/30 opacity-40'
-        : 'border-white/15 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(24,24,27,0.92)_42%,rgba(0,0,0,0.96))] hover:border-yellow-400/70'
+        : disabled
+          ? 'border-white/10 bg-black/30 opacity-35'
+          : 'border-white/15 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(24,24,27,0.92)_42%,rgba(0,0,0,0.96))] hover:border-yellow-400/70'
   }`;
 
   if (!onClick) return <div className={className}>{content}</div>;
@@ -2473,6 +2654,7 @@ function DraftRollPanel({
   seenTeamCount,
   teamPoolCount,
   teamById,
+  isPlayerDisabled,
   onRoll,
   onSelect,
   onToggleAutoRoll,
@@ -2487,6 +2669,7 @@ function DraftRollPanel({
   seenTeamCount: number;
   teamPoolCount: number;
   teamById: Map<string, SeasonTeam>;
+  isPlayerDisabled: (player: Player) => boolean;
   onRoll: () => void;
   onSelect: (playerId: string) => void;
   onToggleAutoRoll: () => void;
@@ -2554,6 +2737,7 @@ function DraftRollPanel({
           {rolledSquad.players.map((player) => {
             const team = player.teamId ? teamById.get(player.teamId) ?? null : null;
             const selected = selectedIds.has(player.id);
+            const disabledByRosterNeed = isPlayerDisabled(player);
             return (
               <PremiumPlayerCard
                 key={player.id}
@@ -2561,7 +2745,7 @@ function DraftRollPanel({
                 team={team}
                 selected={selected}
                 active={pendingPlayerId === player.id}
-                disabled={!draft.pickAvailable || !draft.teamName.trim()}
+                disabled={!draft.pickAvailable || !draft.teamName.trim() || disabledByRosterNeed}
                 onClick={() => onSelect(player.id)}
               />
             );
@@ -3005,13 +3189,15 @@ function FixtureRow({
   teamNameOf,
   highlightTeamIds,
   dark = false,
+  hideResult = false,
 }: {
   fixture: CompetitionFixture;
   teamNameOf: (teamId: string) => string;
   highlightTeamIds: string[];
   dark?: boolean;
+  hideResult?: boolean;
 }) {
-  const score = finalScore(fixture);
+  const score = hideResult ? null : finalScore(fixture);
   const owned = highlightTeamIds.includes(fixture.homeTeamId) || highlightTeamIds.includes(fixture.awayTeamId);
   return (
     <div className={`grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3 border-2 border-black p-3 text-xs font-black shadow-[3px_3px_0px_0px_#000] ${owned ? 'bg-yellow-400 text-black' : dark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
