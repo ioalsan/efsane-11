@@ -1,7 +1,7 @@
 ﻿'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { FastForward, Flag, Gauge, HeartPulse, RefreshCw, ShieldAlert, SkipForward } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { CheckCircle2, FastForward, Flag, Gauge, HeartPulse, RefreshCw, ShieldAlert, SkipForward, Zap } from 'lucide-react';
 import type {
   CompetitionFixture,
   MatchIncident,
@@ -20,6 +20,7 @@ import {
 import MatchPitchAnimation from './MatchPitchAnimation';
 
 type MatchPhase = 'normal' | 'extra-time' | 'penalties' | 'finished';
+type SimulationSpeed = 'normal' | 'fast' | 'very-fast';
 
 interface TimelineEntry {
   id: string;
@@ -33,6 +34,12 @@ const EXTRA_TIME_CHECKPOINTS = [105, 120];
 const MANAGER_CHECKPOINTS = [3, 6, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 90];
 const MANAGER_EXTRA_TIME_CHECKPOINTS = [95, 100, 105, 110, 115, 120];
 const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const speedLabels: Record<SimulationSpeed, string> = {
+  normal: 'Normal',
+  fast: 'Hızlı',
+  'very-fast': 'Çok hızlı',
+};
 
 const incidentText = (incident: MatchIncident, teamName: string) => {
   if (incident.type === 'goal') return `GOL - ${teamName}: ${incident.playerName}`;
@@ -73,6 +80,8 @@ const createInitialTimeline = (): TimelineEntry[] => [{
   tone: 'neutral',
 }];
 
+const finalScoreOf = (result: MatchResult) => result.extraTime ?? result.normalTime;
+
 export default function LiveMatchPanel({
   fixture,
   result,
@@ -96,14 +105,46 @@ export default function LiveMatchPanel({
   const [penaltyScore, setPenaltyScore] = useState({ home: 0, away: 0 });
   const [timeline, setTimeline] = useState<TimelineEntry[]>(createInitialTimeline);
   const [animationState, setAnimationState] = useState(createMatchAnimationState);
-  const [speed, setSpeed] = useState<'normal' | 'fast'>('normal');
-  const speedRef = useRef<'normal' | 'fast'>('normal');
+  const [speed, setSpeed] = useState<SimulationSpeed>('fast');
+  const [autoContinue, setAutoContinue] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const speedRef = useRef<SimulationSpeed>('fast');
+  const autoContinueRef = useRef(false);
   const skipRef = useRef(false);
+  const skipHandledRef = useRef(false);
+  const completeHandledRef = useRef(false);
+  const manualAnimationSequenceRef = useRef(0);
+  const timeoutIdsRef = useRef<Array<{ id: number; resolve: () => void }>>([]);
   const completeRef = useRef(onComplete);
 
   useEffect(() => {
     completeRef.current = onComplete;
   }, [onComplete]);
+
+  useEffect(() => {
+    autoContinueRef.current = autoContinue;
+  }, [autoContinue]);
+
+  const clearPendingTimers = useCallback(() => {
+    timeoutIdsRef.current.forEach(({ id, resolve }) => {
+      window.clearTimeout(id);
+      resolve();
+    });
+    timeoutIdsRef.current = [];
+  }, []);
+
+  const completeOnce = useCallback(() => {
+    if (completeHandledRef.current) return;
+    completeHandledRef.current = true;
+    clearPendingTimers();
+    completeRef.current();
+  }, [clearPendingTimers]);
+
+  useEffect(() => {
+    if (!autoContinue || phase !== 'finished' || completeHandledRef.current) return;
+    const timeoutId = window.setTimeout(() => completeOnce(), 1400);
+    return () => window.clearTimeout(timeoutId);
+  }, [autoContinue, completeOnce, phase]);
 
   const addEntry = (entry: TimelineEntry) => {
     setTimeline((items) => [...items, entry]);
@@ -115,15 +156,34 @@ export default function LiveMatchPanel({
     let animationSequence = 0;
     let momentumSamples: MomentumSample[] = [];
     skipRef.current = false;
-    speedRef.current = 'normal';
+    skipHandledRef.current = false;
+    completeHandledRef.current = false;
+    speedRef.current = 'fast';
+    clearPendingTimers();
     const isManagerMode = simulationMode === 'manager';
     const normalCheckpoints = isManagerMode ? MANAGER_CHECKPOINTS : CHECKPOINTS;
     const extraCheckpoints = isManagerMode ? MANAGER_EXTRA_TIME_CHECKPOINTS : EXTRA_TIME_CHECKPOINTS;
 
+    const trackedDelay = async (duration: number) => {
+      await new Promise<void>((resolve) => {
+        const timeoutId = window.setTimeout(() => {
+          timeoutIdsRef.current = timeoutIdsRef.current.filter((timer) => timer.id !== timeoutId);
+          resolve();
+        }, duration);
+        timeoutIdsRef.current = [...timeoutIdsRef.current, { id: timeoutId, resolve }];
+      });
+    };
+
     const wait = async () => {
       if (skipRef.current) return;
-      const duration = speedRef.current === 'fast' ? 95 : isManagerMode ? 1050 : 430;
-      await new Promise<void>((resolve) => window.setTimeout(resolve, duration));
+      const duration = speedRef.current === 'very-fast'
+        ? 45
+        : speedRef.current === 'fast'
+          ? 135
+          : isManagerMode
+            ? 620
+            : 330;
+      await trackedDelay(duration);
     };
 
     const resetMatchState = () => {
@@ -134,7 +194,8 @@ export default function LiveMatchPanel({
       setPenaltyScore({ home: 0, away: 0 });
       setTimeline(createInitialTimeline());
       setAnimationState(createMatchAnimationState());
-      setSpeed('normal');
+      setSpeed('fast');
+      setShowRecovery(false);
       momentumSamples = [];
     };
 
@@ -155,7 +216,7 @@ export default function LiveMatchPanel({
     };
 
     const revealIncident = async (incident: MatchIncident, index: number) => {
-      if (cancelled) return;
+      if (cancelled || skipRef.current) return;
       const side: MatchSide = incident.teamId === fixture.homeTeamId ? 'home' : 'away';
       if (incident.type === 'goal') {
         runningScore = {
@@ -201,7 +262,7 @@ export default function LiveMatchPanel({
         .sort((a, b) => a - b);
 
       for (const moment of moments) {
-        if (cancelled) return;
+        if (cancelled || skipRef.current) return;
         setMinute(moment);
         const currentIncidents = incidents.filter((incident) => incident.minute === moment);
         if (currentIncidents.length === 0) {
@@ -223,13 +284,14 @@ export default function LiveMatchPanel({
           await wait();
         }
         for (let index = 0; index < currentIncidents.length; index += 1) {
+          if (cancelled || skipRef.current) return;
           await revealIncident(currentIncidents[index], index);
         }
       }
     };
 
     const revealPenalty = async (kick: PenaltyKick) => {
-      if (cancelled) return;
+      if (cancelled || skipRef.current) return;
       const side: MatchSide = kick.teamId === fixture.homeTeamId ? 'home' : 'away';
       setPenaltyScore({ home: kick.homeScore, away: kick.awayScore });
       showAnimation(kick.scored ? 'penaltyGoal' : 'penaltyMiss', side, `P${kick.order}`);
@@ -243,13 +305,19 @@ export default function LiveMatchPanel({
     };
 
     const run = async () => {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await trackedDelay(0);
       if (cancelled) return;
       resetMatchState();
 
+      const recoveryTimeout = window.setTimeout(() => {
+        timeoutIdsRef.current = timeoutIdsRef.current.filter((timer) => timer.id !== recoveryTimeout);
+        if (!cancelled && !completeHandledRef.current && !skipRef.current) setShowRecovery(true);
+      }, 45000);
+      timeoutIdsRef.current = [...timeoutIdsRef.current, { id: recoveryTimeout, resolve: () => {} }];
+
       const normalIncidents = result.incidents.filter((incident) => incident.minute <= 90);
       await playMinutes(1, 90, normalCheckpoints, normalIncidents);
-      if (cancelled) return;
+      if (cancelled || skipRef.current) return;
 
       addEntry({
         id: 'normal-time',
@@ -265,7 +333,7 @@ export default function LiveMatchPanel({
         showAnimation('extraTime', 'neutral', "90+");
         const extraIncidents = result.incidents.filter((incident) => incident.minute > 90);
         await playMinutes(91, 120, extraCheckpoints, extraIncidents);
-        if (cancelled) return;
+        if (cancelled || skipRef.current) return;
         addEntry({
           id: 'extra-time',
           minute: "120'",
@@ -279,12 +347,18 @@ export default function LiveMatchPanel({
       if (result.penalties && result.penaltyKicks) {
         setPhase('penalties');
         showAnimation('penaltyShootout', 'neutral', 'PEN');
-        for (const kick of result.penaltyKicks) await revealPenalty(kick);
+        for (const kick of result.penaltyKicks) {
+          if (cancelled || skipRef.current) return;
+          await revealPenalty(kick);
+        }
       }
 
-      if (cancelled) return;
+      if (cancelled || skipRef.current) return;
+      const finalScore = finalScoreOf(result);
       setPhase('finished');
       setMinute(result.extraTime ? 120 : 90);
+      setScore(finalScore);
+      setPenaltyScore(result.penalties ?? { home: 0, away: 0 });
       addEntry({
         id: 'finished',
         minute: 'FT',
@@ -292,25 +366,58 @@ export default function LiveMatchPanel({
         tone: 'neutral',
       });
       showAnimation('fulltime', 'neutral', 'FT');
-      completeRef.current();
+      if (autoContinueRef.current) {
+        await trackedDelay(2400);
+        if (!cancelled) completeOnce();
+      }
     };
 
     void run();
     return () => {
       cancelled = true;
+      clearPendingTimers();
     };
-  }, [awayName, fixture.awayTeamId, fixture.homeTeamId, homeName, result, simulationMode]);
+  }, [awayName, clearPendingTimers, completeOnce, fixture.awayTeamId, fixture.homeTeamId, homeName, result, simulationMode]);
 
-  const toggleSpeed = () => {
-    const next = speed === 'normal' ? 'fast' : 'normal';
+  const setSimulationSpeed = (next: SimulationSpeed) => {
     speedRef.current = next;
     setSpeed(next);
   };
 
+  const revealFinalResult = (entryText: string) => {
+    const finalScore = finalScoreOf(result);
+    setPhase('finished');
+    setMinute(result.extraTime ? 120 : 90);
+    setScore(finalScore);
+    setPenaltyScore(result.penalties ?? { home: 0, away: 0 });
+    setShowRecovery(false);
+    manualAnimationSequenceRef.current += 1;
+    setAnimationState(eventToAnimationState({
+      event: 'fulltime',
+      side: 'neutral',
+      minuteLabel: 'FT',
+      sequence: manualAnimationSequenceRef.current,
+      momentum: calculateMomentum([]),
+    }));
+    setTimeline((items) => (
+      items.some((entry) => entry.id === 'skipped-result' || entry.id === 'finished')
+        ? items
+        : [...items, {
+          id: 'skipped-result',
+          minute: 'FT',
+          text: entryText,
+          tone: 'neutral',
+        }]
+    ));
+  };
+
   const skipToResult = () => {
+    if (skipHandledRef.current || completeHandledRef.current) return;
+    skipHandledRef.current = true;
     skipRef.current = true;
-    speedRef.current = 'fast';
-    setSpeed('fast');
+    clearPendingTimers();
+    setSimulationSpeed('very-fast');
+    revealFinalResult('Sonuca atlandı. Final skoru gösteriliyor.');
     onSkip?.();
   };
 
@@ -369,22 +476,65 @@ export default function LiveMatchPanel({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
+        {(['normal', 'fast', 'very-fast'] as SimulationSpeed[]).map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setSimulationSpeed(option)}
+            className={`game-button flex items-center gap-2 border-2 px-4 py-2 text-[10px] font-black uppercase ${
+              speed === option
+                ? 'border-yellow-400 bg-yellow-400 text-black'
+                : 'border-white/25 bg-zinc-900 text-white'
+            }`}
+          >
+            {option === 'very-fast' ? <Zap size={16} /> : option === 'fast' ? <FastForward size={16} /> : <Gauge size={16} />}
+            {speedLabels[option]}
+          </button>
+        ))}
         <button
           type="button"
-          onClick={toggleSpeed}
-          className="game-button flex items-center gap-2 border-2 border-white/25 bg-zinc-900 px-4 py-2 text-[10px] font-black uppercase"
+          onClick={() => setAutoContinue((value) => !value)}
+          className={`game-button flex items-center gap-2 border-2 px-4 py-2 text-[10px] font-black uppercase ${
+            autoContinue
+              ? 'border-green-400 bg-green-500 text-black'
+              : 'border-white/25 bg-zinc-900 text-white'
+          }`}
         >
-          {speed === 'fast' ? <Gauge size={16} /> : <FastForward size={16} />}
-          {speed === 'fast' ? 'Normal hız' : 'Simülasyonu hızlandır'}
+          <RefreshCw size={16} /> Auto devam: {autoContinue ? 'Açık' : 'Kapalı'}
         </button>
         <button
           type="button"
           onClick={skipToResult}
+          disabled={phase === 'finished'}
           className="game-button flex items-center gap-2 border-2 border-black bg-yellow-500 px-4 py-2 text-[10px] font-black uppercase text-black"
         >
           <SkipForward size={16} /> Sonuca atla
         </button>
+        {phase === 'finished' && (
+          <button
+            type="button"
+            onClick={completeOnce}
+            className="game-button flex items-center gap-2 border-2 border-black bg-green-500 px-4 py-2 text-[10px] font-black uppercase text-black"
+          >
+            <CheckCircle2 size={16} /> {autoContinue ? 'Otomatik devam ediyor' : 'Devam et'}
+          </button>
+        )}
+        {showRecovery && phase !== 'finished' && (
+          <button
+            type="button"
+            onClick={skipToResult}
+            className="game-button flex items-center gap-2 border-2 border-red-500 bg-red-600 px-4 py-2 text-[10px] font-black uppercase text-white"
+          >
+            <ShieldAlert size={16} /> Simülasyon takıldıysa sonucu göster
+          </button>
+        )}
       </div>
+
+      {phase === 'finished' && (
+        <p className="mt-3 border-2 border-green-400 bg-green-500/10 p-3 text-xs font-black uppercase text-green-200">
+          Maç tamamlandı. {autoContinue ? 'Kısa süre sonra otomatik devam edilecek.' : 'Devam etmek için butona bas.'}
+        </p>
+      )}
 
       <div className="mt-5 max-h-80 space-y-2 overflow-y-auto border-t border-white/10 pt-4" aria-live="polite">
         {[...timeline].reverse().map((entry) => (

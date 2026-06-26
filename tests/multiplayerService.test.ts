@@ -232,6 +232,54 @@ test('invite league waits for every user match progress before advancing the wee
   assert.equal(advanced.standings.some((row) => row.played > 0), true);
 });
 
+test('invite league can advance at least 20 generated weeks without getting stuck', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .filter((team) => getTeamPlayers(team.id, dataset).length >= 18)
+    .slice(0, 2);
+  assert.equal(sourceTeams.length, 2);
+
+  let league = createLeague({
+    name: 'Yirmi Hafta Ligi',
+    ownerId: 'owner-1',
+    maxUsers: 2,
+    powerLimit: 'free',
+  });
+
+  sourceTeams.forEach((sourceTeam, index) => {
+    const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+    league = saveTeamToLeague(league.id, buildMultiplayerTeamInput({
+      ownerId: `user-${index + 1}`,
+      teamName: `Akis ${index + 1}`,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0].id,
+      startingPlayers: players.slice(0, 11),
+      substitutes: players.slice(11, 18),
+      reserves: [],
+    }));
+  });
+
+  league = startLeague(league.id, 'owner-1', dataset);
+
+  for (let week = 0; week < 20; week += 1) {
+    league = simulateWeek(league.id, dataset).league;
+    assert.equal(league.currentWeek, week);
+    const progress = league.weekProgress.filter((item) => item.week === week + 1);
+    assert.equal(progress.length, 2);
+    assert.equal(progress.every((item) => item.status === 'pending'), true);
+
+    updateWeekUserProgress(league.id, 'user-1', 'completed');
+    updateWeekUserProgress(league.id, 'user-2', 'skipped');
+    league = simulateWeek(league.id, dataset).league;
+    assert.equal(league.currentWeek, week + 1);
+  }
+
+  assert.equal(league.matchReports.length, 20 * league.fixtures[0].length);
+  assert.equal(league.standings.some((row) => row.played >= 20), true);
+});
+
 test('local friend league replaces the weakest real teams and creates a full 18-team season', () => {
   installLocalStorage();
   const dataset = getSeasonDataset();

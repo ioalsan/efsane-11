@@ -84,6 +84,7 @@ const maxUserOptions: MultiplayerMaxUsers[] = [2, 4, 8, 12, 18];
 const friendCountOptions = [2, 3, 4, 5];
 const powerLimitOptions: MultiplayerPowerLimit[] = ['balanced', 'max80', 'max85', 'free'];
 const tacticOptions: ManagerMentality[] = ['Gegenpress', 'Balanced', 'ParkTheBus'];
+const INVITE_DRAFT_STORAGE_PREFIX = 'canli11:draft';
 const friendCompetitionIds = [
   DEFAULT_COMPETITION_ID,
   'champions-league',
@@ -194,6 +195,72 @@ const createEmptyInviteDraft = (): InviteDraft => ({
   pickAvailable: false,
   autoRoll: false,
 });
+
+const inviteDraftStorageKey = (leagueId: string, userId: string) => `${INVITE_DRAFT_STORAGE_PREFIX}:${leagueId}:${userId}`;
+
+const isFormationType = (value: unknown): value is FormationType => (
+  typeof value === 'string' && FORMATIONS.some((item) => item.id === value)
+);
+
+const isManagerMentality = (value: unknown): value is ManagerMentality => (
+  typeof value === 'string' && tacticOptions.includes(value as ManagerMentality)
+);
+
+const isInviteDraftDirty = (draft: InviteDraft) => (
+  draft.teamName.trim().length > 0 ||
+  Boolean(draft.formation) ||
+  Boolean(draft.tactic) ||
+  Boolean(draft.captainId) ||
+  getRosterCount(draft.startingXI) > 0 ||
+  getRosterCount(draft.substitutes) > 0 ||
+  draft.rolledTeamIds.length > 0 ||
+  Boolean(draft.rolledSquadId) ||
+  draft.pickAvailable ||
+  draft.autoRoll
+);
+
+const parseStoredInviteDraft = (value: unknown): InviteDraft | null => {
+  if (!value || typeof value !== 'object') return null;
+  const draft = value as Partial<InviteDraft>;
+  return {
+    teamName: typeof draft.teamName === 'string' ? draft.teamName : '',
+    formation: isFormationType(draft.formation) ? draft.formation : null,
+    tactic: isManagerMentality(draft.tactic) ? draft.tactic : null,
+    captainId: typeof draft.captainId === 'string' ? draft.captainId : null,
+    startingXI: normalizeStartingSlots(Array.isArray(draft.startingXI) ? draft.startingXI.filter((id): id is string => typeof id === 'string') : []),
+    substitutes: Array.isArray(draft.substitutes) ? draft.substitutes.filter((id): id is string => typeof id === 'string').slice(0, 7) : [],
+    reserves: [],
+    rolledSquadId: typeof draft.rolledSquadId === 'string' ? draft.rolledSquadId : null,
+    rolledTeamIds: Array.isArray(draft.rolledTeamIds) ? draft.rolledTeamIds.filter((id): id is string => typeof id === 'string') : [],
+    pickAvailable: Boolean(draft.pickAvailable),
+    autoRoll: Boolean(draft.autoRoll),
+  };
+};
+
+const readStoredInviteDraft = (key: string): InviteDraft | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? parseStoredInviteDraft(JSON.parse(raw) as unknown) : null;
+  } catch {
+    window.sessionStorage.removeItem(key);
+    return null;
+  }
+};
+
+const writeStoredInviteDraft = (key: string, draft: InviteDraft) => {
+  if (typeof window === 'undefined') return;
+  if (!isInviteDraftDirty(draft)) {
+    window.sessionStorage.removeItem(key);
+    return;
+  }
+  window.sessionStorage.setItem(key, JSON.stringify(draft));
+};
+
+const removeStoredInviteDraft = (key: string | null) => {
+  if (typeof window === 'undefined' || !key) return;
+  window.sessionStorage.removeItem(key);
+};
 
 const rightBackPosition = 'SĞB' as Player['position'];
 const rightWingPosition = 'SĞK' as Player['position'];
@@ -441,10 +508,13 @@ export default function MultiplayerLeague({
   const inviteDraftPanelRef = useRef<HTMLDivElement | null>(null);
   const invitePitchRef = useRef<HTMLDivElement | null>(null);
   const inviteSaveRef = useRef<HTMLDivElement | null>(null);
+  const liveMatchRef = useRef<HTMLDivElement | null>(null);
+  const inviteDraftKeyRef = useRef<string | null>(null);
+  const liveSkippedRef = useRef(false);
 
-  const scrollToElement = (element: HTMLElement | null) => {
+  const scrollToElement = useCallback((element: HTMLElement | null) => {
     element?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
-  };
+  }, []);
 
   const [user, setUser] = useState<LocalAuthUser | null>(null);
   const [managerName, setManagerName] = useState('Canlı11 Menajeri');
@@ -462,6 +532,7 @@ export default function MultiplayerLeague({
   const [liveFixture, setLiveFixture] = useState<CompetitionFixture | null>(null);
   const [liveProgressId, setLiveProgressId] = useState<string | null>(null);
   const [liveSkipped, setLiveSkipped] = useState(false);
+  const [shouldScrollToLive, setShouldScrollToLive] = useState(false);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
   const [slotDrafts, setSlotDrafts] = useState<Record<string, SlotDraft>>({});
   const [pendingPlacementPlayerId, setPendingPlacementPlayerId] = useState<string | null>(null);
@@ -575,6 +646,9 @@ export default function MultiplayerLeague({
     () => leagues.find((league) => league.id === activeLeagueId) ?? leagues[0] ?? null,
     [activeLeagueId, leagues],
   );
+  const activeLeagueIdValue = activeLeague?.id ?? null;
+  const activeLeagueMode = activeLeague?.mode ?? null;
+  const activeLeagueStatus = activeLeague?.status ?? null;
   const friendCompetitionOptions = useMemo(
     () => getCompetitions(dataset).filter((competition) => friendCompetitionIds.includes(competition.competitionId)),
     [dataset],
@@ -584,8 +658,11 @@ export default function MultiplayerLeague({
     () => friendCompetitionOptions.find((competition) => competition.competitionId === activeCompetitionId) ?? null,
     [activeCompetitionId, friendCompetitionOptions],
   );
-  const isLocalFriendLeague = activeLeague?.mode === 'local-friends';
-  const isOnlineInviteLeague = Boolean(onlineConfigured && onlineReady && activeLeague?.mode === 'invite');
+  const currentInviteDraftStorageKey = activeLeagueMode === 'invite' && activeLeagueIdValue && user
+    ? inviteDraftStorageKey(activeLeagueIdValue, user.id)
+    : null;
+  const isLocalFriendLeague = activeLeagueMode === 'local-friends';
+  const isOnlineInviteLeague = Boolean(onlineConfigured && onlineReady && activeLeagueMode === 'invite');
   const playerSlots = useMemo(() => activeLeague?.playerSlots ?? [], [activeLeague]);
   const activeSlot = useMemo(() => {
     if (!isLocalFriendLeague) return null;
@@ -839,13 +916,33 @@ export default function MultiplayerLeague({
   }, [activeLeague, ownedTeam]);
 
   useEffect(() => {
-    if (!activeLeague || activeLeague.mode !== 'invite' || activeLeague.status !== 'waiting') return;
+    if (activeLeagueMode !== 'invite' || activeLeagueStatus !== 'waiting' || !currentInviteDraftStorageKey) return;
     const timer = window.setTimeout(() => {
-      setInviteDraft(savedInviteDraft ?? quickInviteDraft);
+      const sameDraftKey = inviteDraftKeyRef.current === currentInviteDraftStorageKey;
+      if (sameDraftKey) return;
+      inviteDraftKeyRef.current = currentInviteDraftStorageKey;
+      const storedDraft = readStoredInviteDraft(currentInviteDraftStorageKey);
+      setInviteDraft(savedInviteDraft ?? storedDraft ?? createEmptyInviteDraft());
       setInvitePlacement(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeLeague, quickInviteDraft, savedInviteDraft]);
+  }, [activeLeagueIdValue, activeLeagueMode, activeLeagueStatus, currentInviteDraftStorageKey, savedInviteDraft]);
+
+  useEffect(() => {
+    if (!currentInviteDraftStorageKey || activeLeagueMode !== 'invite' || activeLeagueStatus !== 'waiting') return;
+    if (savedInviteDraft) return;
+    writeStoredInviteDraft(currentInviteDraftStorageKey, inviteDraft);
+  }, [activeLeagueMode, activeLeagueStatus, currentInviteDraftStorageKey, inviteDraft, savedInviteDraft]);
+
+  useEffect(() => {
+    if (!shouldScrollToLive || !liveFixture?.result) return;
+    const timer = window.setTimeout(() => {
+      scrollToElement(liveMatchRef.current);
+      setShouldScrollToLive(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [liveFixture?.id, liveFixture?.result, scrollToElement, shouldScrollToLive]);
+
   const activeDraftSelectedIds = useMemo(
     () => new Set(activeDraft ? draftPlayerIds(activeDraft) : []),
     [activeDraft],
@@ -911,11 +1008,11 @@ export default function MultiplayerLeague({
 
   useEffect(() => {
     if (activeSlotReadyToSave) scrollToElement(activeSaveRef.current);
-  }, [activeSlotReadyToSave]);
+  }, [activeSlotReadyToSave, scrollToElement]);
 
   useEffect(() => {
     if (teamPreview) scrollToElement(inviteSaveRef.current);
-  }, [teamPreview]);
+  }, [scrollToElement, teamPreview]);
 
   const setResultNotice = (tone: NoticeTone, text: string) => {
     setNotice({ tone, text });
@@ -1202,6 +1299,12 @@ export default function MultiplayerLeague({
     }));
   };
 
+  const resetInviteDraft = () => {
+    removeStoredInviteDraft(currentInviteDraftStorageKey);
+    setInviteDraft(createEmptyInviteDraft());
+    setInvitePlacement(null);
+  };
+
   const selectInvitePlayerForPlacement = (playerId: string, source: PlacementSource = 'pool', slotIndex?: number) => {
     if (source === 'draft') {
       if (!inviteDraft.teamName.trim()) {
@@ -1354,12 +1457,14 @@ export default function MultiplayerLeague({
         const league = await saveOnlineTeamToLeague(activeLeague.id, teamPreview);
         refreshOnlineLeague(league);
         setActiveLeagueId(league.id);
+        removeStoredInviteDraft(currentInviteDraftStorageKey);
         setResultNotice('success', `${teamPreview.teamName} lige kaydedildi.`);
         return;
       }
       const league = saveTeamToLeague(activeLeague.id, teamPreview);
       refreshLeagues(league.id);
       setActiveLeagueId(league.id);
+      removeStoredInviteDraft(currentInviteDraftStorageKey);
       setResultNotice('success', `${teamPreview.teamName} lige kaydedildi.`);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
@@ -1405,6 +1510,7 @@ export default function MultiplayerLeague({
       setResultNotice('success', generatedOnly
         ? `${activeLeague.currentWeek + 1}. hafta basladi. Kullanici maclari izlenebilir.`
         : `${result.league.currentWeek}. hafta tamamlandi.`);
+      if (generatedOnly) await openOwnGeneratedMatch(result.league);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
     }
@@ -1424,6 +1530,20 @@ export default function MultiplayerLeague({
     return league;
   };
 
+  const openOwnGeneratedMatch = async (league: MultiplayerLeagueSave) => {
+    if (!user || liveFixture) return;
+    const progress = getCurrentWeekProgress(league).find((item) => item.userId === user.id);
+    if (!progress || progress.status === 'completed' || progress.status === 'skipped') return;
+    const fixture = league.fixtures[league.currentWeek]?.find((item) => item.id === progress.matchId);
+    if (!fixture?.result) return;
+    await updateCurrentUserWeekProgress('watching');
+    setLiveProgressId(progress.id);
+    setLiveSkipped(false);
+    liveSkippedRef.current = false;
+    setLiveFixture(fixture);
+    setShouldScrollToLive(true);
+  };
+
   const handleWatchMyMatch = async (progress: WeekUserProgress) => {
     if (!activeLeague) return;
     const fixture = currentRound.find((item) => item.id === progress.matchId);
@@ -1432,28 +1552,34 @@ export default function MultiplayerLeague({
       await updateCurrentUserWeekProgress('watching');
       setLiveProgressId(progress.id);
       setLiveSkipped(false);
+      liveSkippedRef.current = false;
       setLiveFixture(fixture);
+      setShouldScrollToLive(true);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
     }
   };
 
   const skipLiveMatch = async () => {
-    if (liveSkipped) return;
+    if (liveSkippedRef.current) return;
     try {
+      liveSkippedRef.current = true;
       setLiveSkipped(true);
       await updateCurrentUserWeekProgress('skipped');
     } catch (error) {
+      liveSkippedRef.current = false;
+      setLiveSkipped(false);
       setResultNotice('error', getErrorMessage(error));
     }
   };
 
   const completeLiveMatch = async () => {
     try {
-      if (!liveSkipped) await updateCurrentUserWeekProgress('completed');
+      if (!liveSkippedRef.current && !liveSkipped) await updateCurrentUserWeekProgress('completed');
       setLiveFixture(null);
       setLiveProgressId(null);
       setLiveSkipped(false);
+      liveSkippedRef.current = false;
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
     }
@@ -1850,8 +1976,8 @@ export default function MultiplayerLeague({
                     )}
                   </section>
 
-                  <div className="grid gap-5 xl:grid-cols-[360px_minmax(320px,420px)_minmax(430px,1fr)]">
-                    <div ref={activePitchRef}>
+                  <div className="grid gap-5 xl:grid-cols-[minmax(280px,320px)_minmax(520px,1fr)_minmax(300px,360px)]">
+                    <div ref={activePitchRef} className="xl:order-2">
                       <FriendPitchBoard
                         draft={activeDraft}
                         playerById={playerById}
@@ -1866,7 +1992,7 @@ export default function MultiplayerLeague({
                       />
                     </div>
 
-                    <div ref={activeDraftPanelRef}>
+                    <div ref={activeDraftPanelRef} className="xl:order-1">
                       <DraftRollPanel
                         draft={activeDraft}
                         rolledSquad={activeRolledSquad}
@@ -1885,12 +2011,14 @@ export default function MultiplayerLeague({
                       />
                     </div>
 
-                    <SelectedPlacementPanel
-                      player={pendingPlacementPlayer}
-                      team={pendingPlacementPlayer?.teamId ? teamById.get(pendingPlacementPlayer.teamId) ?? null : null}
-                      warnings={positionWarnings}
-                      canPlace={Boolean(pendingPlacementPlayer)}
-                    />
+                    <div className="xl:order-3">
+                      <SelectedPlacementPanel
+                        player={pendingPlacementPlayer}
+                        team={pendingPlacementPlayer?.teamId ? teamById.get(pendingPlacementPlayer.teamId) ?? null : null}
+                        warnings={positionWarnings}
+                        canPlace={Boolean(pendingPlacementPlayer)}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid gap-5 xl:grid-cols-[360px_1fr_1fr]">
@@ -2166,6 +2294,13 @@ export default function MultiplayerLeague({
                         </button>
                         <button
                           type="button"
+                          onClick={resetInviteDraft}
+                          className="game-button border-2 border-white/20 bg-black px-4 py-3 text-xs font-black uppercase text-white"
+                        >
+                          KADROYU SIFIRLA
+                        </button>
+                        <button
+                          type="button"
                           onClick={handleSaveTeam}
                           disabled={inviteSaveIssues.length > 0 || !teamPreview || exceedsPowerLimit}
                           className="game-button flex items-center gap-2 border-2 border-black bg-green-600 px-4 py-3 text-xs font-black uppercase text-white disabled:opacity-35"
@@ -2231,8 +2366,8 @@ export default function MultiplayerLeague({
                       </div>
                     )}
 
-                    <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(280px,360px)_minmax(420px,1fr)]">
-                      <div ref={inviteDraftPanelRef}>
+                    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(280px,320px)_minmax(520px,1fr)_minmax(300px,360px)]">
+                      <div ref={inviteDraftPanelRef} className="xl:order-1">
                         <DraftRollPanel
                           draft={inviteRollDraft}
                           rolledSquad={inviteRolledSquad}
@@ -2275,14 +2410,16 @@ export default function MultiplayerLeague({
                         </div>
                       </section>
 
-                      <SelectedPlacementPanel
-                        player={invitePlacementPlayer}
-                        team={invitePlacementPlayer?.teamId ? teamById.get(invitePlacementPlayer.teamId) ?? null : null}
-                        warnings={invitePositionWarnings}
-                        canPlace={Boolean(invitePlacementPlayer)}
-                      />
+                      <div className="xl:order-3">
+                        <SelectedPlacementPanel
+                          player={invitePlacementPlayer}
+                          team={invitePlacementPlayer?.teamId ? teamById.get(invitePlacementPlayer.teamId) ?? null : null}
+                          warnings={invitePositionWarnings}
+                          canPlace={Boolean(invitePlacementPlayer)}
+                        />
+                      </div>
 
-                      <div ref={invitePitchRef}>
+                      <div ref={invitePitchRef} className="xl:order-2">
                         <FriendPitchBoard
                           draft={invitePitchDraft}
                           playerById={playerById}
@@ -2454,20 +2591,22 @@ export default function MultiplayerLeague({
                   )}
 
                   {liveFixture?.result && (
-                    <LiveMatchPanel
-                      fixture={liveFixture}
-                      result={liveFixture.result}
-                      homeName={teamNameOf(liveFixture.homeTeamId)}
-                      awayName={teamNameOf(liveFixture.awayTeamId)}
-                      onComplete={() => {
-                        if (liveProgressId) void completeLiveMatch();
-                        else setLiveFixture(null);
-                      }}
-                      onSkip={() => {
-                        if (liveProgressId) void skipLiveMatch();
-                      }}
-                      simulationMode="manager"
-                    />
+                    <div ref={liveMatchRef} className="scroll-mt-24">
+                      <LiveMatchPanel
+                        fixture={liveFixture}
+                        result={liveFixture.result}
+                        homeName={teamNameOf(liveFixture.homeTeamId)}
+                        awayName={teamNameOf(liveFixture.awayTeamId)}
+                        onComplete={() => {
+                          if (liveProgressId) void completeLiveMatch();
+                          else setLiveFixture(null);
+                        }}
+                        onSkip={() => {
+                          if (liveProgressId) void skipLiveMatch();
+                        }}
+                        simulationMode="manager"
+                      />
+                    </div>
                   )}
 
                   <section className="border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
