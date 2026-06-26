@@ -74,7 +74,7 @@ import type { CompetitionFixture } from '@/lib/competitionEngine';
 import type { Player, SeasonTeam, Squad } from '@/types';
 import Pitch from './Pitch';
 
-const maxUserOptions: MultiplayerMaxUsers[] = [4, 8, 12, 18];
+const maxUserOptions: MultiplayerMaxUsers[] = [2, 4, 8, 12, 18];
 const friendCountOptions = [2, 3, 4, 5];
 const powerLimitOptions: MultiplayerPowerLimit[] = ['balanced', 'max80', 'max85', 'free'];
 const tacticOptions: ManagerMentality[] = ['Gegenpress', 'Balanced', 'ParkTheBus'];
@@ -106,7 +106,8 @@ interface Notice {
   text: string;
 }
 
-type RosterTarget = 'startingXI' | 'substitutes' | 'reserves';
+type RosterTarget = 'startingXI' | 'substitutes';
+const draftTargetTotal = 18;
 
 interface SlotDraft {
   displayName: string;
@@ -146,13 +147,11 @@ interface PlacementSelection {
 const rosterTargetLabels: Record<RosterTarget, string> = {
   startingXI: 'İlk 11',
   substitutes: 'Yedek',
-  reserves: 'Rezerv',
 };
 
 const rosterTargetLimits: Record<RosterTarget, number> = {
   startingXI: 11,
   substitutes: 7,
-  reserves: 5,
 };
 
 const compactIds = (ids: string[]) => ids.filter((id) => id.trim().length > 0);
@@ -180,28 +179,48 @@ const createEmptyInviteDraft = (): InviteDraft => ({
   autoRoll: false,
 });
 
-const modernPositionToLegacy: Record<string, Player['position']> = {
+const rightBackPosition = 'SĞB' as Player['position'];
+const rightWingPosition = 'SĞK' as Player['position'];
+
+const positionAliases: Record<string, Player['position']> = {
   GK: 'KL',
+  KL: 'KL',
   CB: 'STP',
+  STP: 'STP',
   LB: 'SLB',
-  RB: 'SÃ„Å¾B' as Player['position'],
+  SLB: 'SLB',
+  RB: rightBackPosition,
+  SGB: rightBackPosition,
+  'SĞB': rightBackPosition,
   DM: 'MO',
+  MDO: 'MO',
   CM: 'MO',
+  MO: 'MO',
   AM: 'MO',
+  MOO: 'MO',
   LW: 'SLK',
-  RW: 'SÃ„Å¾K' as Player['position'],
+  SLK: 'SLK',
+  RW: rightWingPosition,
+  SGK: rightWingPosition,
+  'SĞK': rightWingPosition,
   ST: 'SF',
+  SNT: 'SF',
+  SF: 'SF',
 };
+
+const normalizePositionCode = (position?: string | null) => (
+  position ? positionAliases[position] ?? null : null
+);
 
 const positionLabel = (position: string) => {
   const labels: Record<string, string> = {
     KL: 'KL',
     STP: 'STP',
     SLB: 'SLB',
-    'SÄžB': 'SGB',
+    [rightBackPosition]: 'SGB',
     MO: 'MO',
     SLK: 'SLK',
-    'SÄžK': 'SGK',
+    [rightWingPosition]: 'SGK',
     SF: 'SNT',
   };
   return labels[position] ?? position;
@@ -266,7 +285,7 @@ const createDraftFromSlot = (slot: PlayerSlot): SlotDraft => ({
   captainId: slot.captainId,
   startingXI: normalizeStartingSlots(slot.selectedSquad?.startingXI ?? []),
   substitutes: slot.selectedSquad?.substitutes ?? [],
-  reserves: slot.selectedSquad?.reserves ?? [],
+  reserves: [],
   rolledSquadId: null,
   pickAvailable: false,
   autoRoll: false,
@@ -316,7 +335,6 @@ const addRosterPlayer = <
 const draftPlayerIds = (draft: Pick<SlotDraft, 'startingXI' | 'substitutes' | 'reserves'>) => [
   ...draft.startingXI,
   ...draft.substitutes,
-  ...draft.reserves,
 ].filter((id) => id.trim().length > 0);
 
 const getDraftPlayers = (ids: string[], playerById: Map<string, Player>) => (
@@ -326,9 +344,9 @@ const getDraftPlayers = (ids: string[], playerById: Map<string, Player>) => (
 const getPositionWarnings = (players: Player[]) => {
   const counts = {
     goalkeeper: players.filter((player) => player.position === 'KL').length,
-    defense: players.filter((player) => ['STP', 'SLB', 'SÄžB'].includes(player.position)).length,
+    defense: players.filter((player) => ['STP', 'SLB', rightBackPosition].includes(normalizePositionCode(player.position) ?? player.position)).length,
     midfield: players.filter((player) => player.position === 'MO').length,
-    attack: players.filter((player) => ['SLK', 'SÄžK', 'SF'].includes(player.position)).length,
+    attack: players.filter((player) => ['SLK', rightWingPosition, 'SF'].includes(normalizePositionCode(player.position) ?? player.position)).length,
   };
   const warnings: string[] = [];
   if (counts.goalkeeper < 2) warnings.push('Kaleci eksik');
@@ -364,13 +382,14 @@ const getStarCount = (rating: number) => Math.max(1, Math.min(5, Math.round((rat
 
 const isPositionCompatible = (player: Player, allowedPosition: string) => {
   const positions = new Set([
-    player.position,
-    player.secondary_position,
-    ...(player.compatiblePositions ?? []),
-    ...(player.primaryPosition ? [modernPositionToLegacy[player.primaryPosition]] : []),
-    ...(player.secondaryPositions ?? []).map((position) => modernPositionToLegacy[position]),
+    normalizePositionCode(player.position),
+    normalizePositionCode(player.secondary_position),
+    ...(player.compatiblePositions ?? []).map((position) => normalizePositionCode(position)),
+    normalizePositionCode(player.primaryPosition),
+    ...(player.secondaryPositions ?? []).map((position) => normalizePositionCode(position)),
   ].filter(Boolean));
-  return positions.has(allowedPosition as Player['position']);
+  const normalizedAllowedPosition = normalizePositionCode(allowedPosition);
+  return Boolean(normalizedAllowedPosition && positions.has(normalizedAllowedPosition));
 };
 
 export default function MultiplayerLeague({
@@ -414,7 +433,7 @@ export default function MultiplayerLeague({
 
   const showRosterMigrationNotice = useCallback(() => {
     if (!consumeMultiplayerMigrationNotice()) return;
-    setNotice({ tone: 'info', text: 'Eski bozuk kadro kaydı temizlendi. Takımını yeniden kur.' });
+    setNotice({ tone: 'info', text: 'Eski kadro kaydı temizlendi. Takımını yeniden kur.' });
   }, []);
 
   const getVisibleLeagues = (onlineItems = onlineInviteLeagues) => {
@@ -617,7 +636,6 @@ export default function MultiplayerLeague({
       .sort((a, b) => playerScore(b) - playerScore(a));
   }, [competitionId, dataset, selectedIds]);
   const substitutePlayers = useMemo(() => quickBenchPool.slice(0, 7), [quickBenchPool]);
-  const quickReservePlayers = useMemo(() => quickBenchPool.slice(7, 12), [quickBenchPool]);
 
   const inviteStartingPlayers = useMemo(
     () => getDraftPlayers(compactIds(inviteDraft.startingXI), playerById),
@@ -627,11 +645,6 @@ export default function MultiplayerLeague({
     () => getDraftPlayers(inviteDraft.substitutes, playerById),
     [inviteDraft.substitutes, playerById],
   );
-  const inviteReservePlayers = useMemo(
-    () => getDraftPlayers(inviteDraft.reserves, playerById),
-    [inviteDraft.reserves, playerById],
-  );
-
   const teamPreview = useMemo(() => {
     if (
       !user ||
@@ -651,9 +664,9 @@ export default function MultiplayerLeague({
       captainId: inviteDraft.captainId,
       startingPlayers: inviteStartingPlayers,
       substitutes: inviteSubstitutePlayers,
-      reserves: inviteReservePlayers,
+      reserves: [],
     });
-  }, [inviteDraft, inviteReservePlayers, inviteStartingPlayers, inviteSubstitutePlayers, user]);
+  }, [inviteDraft, inviteStartingPlayers, inviteSubstitutePlayers, user]);
   const powerCap = activeLeague ? getPowerLimitCap(activeLeague.powerLimit) : null;
   const exceedsPowerLimit = Boolean(teamPreview && powerCap && teamPreview.rating > powerCap);
   const inviteDraftTotal = useMemo(() => draftPlayerIds(inviteDraft).length, [inviteDraft]);
@@ -688,15 +701,15 @@ export default function MultiplayerLeague({
     return issues;
   }, [inviteDraft]);
   const invitePositionWarnings = useMemo(
-    () => getPositionWarnings([...inviteStartingPlayers, ...inviteSubstitutePlayers, ...inviteReservePlayers]),
-    [inviteReservePlayers, inviteStartingPlayers, inviteSubstitutePlayers],
+    () => getPositionWarnings([...inviteStartingPlayers, ...inviteSubstitutePlayers]),
+    [inviteStartingPlayers, inviteSubstitutePlayers],
   );
   const invitePitchDraft = useMemo(() => ({
     teamName: inviteDraft.teamName,
     formation: inviteDraft.formation ?? '4-2-3-1' as FormationType,
     startingXI: inviteDraft.startingXI,
     substitutes: inviteDraft.substitutes,
-    reserves: inviteDraft.reserves,
+    reserves: [],
   }), [inviteDraft]);
   const inviteRollDraft = useMemo<SlotDraft>(() => ({
     displayName: managerName,
@@ -706,7 +719,7 @@ export default function MultiplayerLeague({
     captainId: inviteDraft.captainId,
     startingXI: inviteDraft.startingXI,
     substitutes: inviteDraft.substitutes,
-    reserves: inviteDraft.reserves,
+    reserves: [],
     rolledSquadId: inviteDraft.rolledSquadId,
     pickAvailable: inviteDraft.pickAvailable,
     autoRoll: inviteDraft.autoRoll,
@@ -722,12 +735,12 @@ export default function MultiplayerLeague({
       captainId: validCaptainId,
       startingXI: normalizeStartingSlots(hasQuickStartingXI ? quickStartingIds : []),
       substitutes: hasQuickStartingXI ? substitutePlayers.map((player) => player.id) : [],
-      reserves: hasQuickStartingXI ? quickReservePlayers.map((player) => player.id) : [],
+      reserves: [],
       rolledSquadId: null,
       pickAvailable: false,
       autoRoll: false,
     };
-  }, [captainId, formation, quickReservePlayers, selectedPlayers, squadName, startingPlayers.length, substitutePlayers, tactic]);
+  }, [captainId, formation, selectedPlayers, squadName, startingPlayers.length, substitutePlayers, tactic]);
   const savedInviteDraft = useMemo<InviteDraft | null>(() => {
     if (!ownedTeam) return null;
     if (hasBrokenRosterSave(ownedTeam)) return null;
@@ -738,7 +751,7 @@ export default function MultiplayerLeague({
       captainId: ownedTeam.captainId,
       startingXI: normalizeStartingSlots(ownedTeam.startingXI),
       substitutes: ownedTeam.substitutes,
-      reserves: ownedTeam.reserves ?? [],
+      reserves: [],
       rolledSquadId: null,
       pickAvailable: false,
       autoRoll: false,
@@ -750,7 +763,7 @@ export default function MultiplayerLeague({
     const timer = window.setTimeout(() => {
       setInviteDraft(createEmptyInviteDraft());
       setInvitePlacement(null);
-      setNotice({ tone: 'info', text: 'Eski bozuk kadro kaydı temizlendi. Takımını yeniden kur.' });
+      setNotice({ tone: 'info', text: 'Eski kadro kaydı temizlendi. Takımını yeniden kur.' });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeLeague, ownedTeam]);
@@ -775,10 +788,6 @@ export default function MultiplayerLeague({
     () => activeDraft ? getDraftPlayers(activeDraft.substitutes, playerById) : [],
     [activeDraft, playerById],
   );
-  const activeDraftReserves = useMemo(
-    () => activeDraft ? getDraftPlayers(activeDraft.reserves, playerById) : [],
-    [activeDraft, playerById],
-  );
   const activeSlotPreview = useMemo(() => {
     if (!activeSlot || !activeDraft || activeDraftStartingPlayers.length !== 11) return null;
     return buildMultiplayerTeamInput({
@@ -789,16 +798,15 @@ export default function MultiplayerLeague({
       captainId: activeDraft.captainId,
       startingPlayers: activeDraftStartingPlayers,
       substitutes: activeDraftSubstitutes,
-      reserves: activeDraftReserves,
+      reserves: [],
     });
-  }, [activeDraft, activeDraftReserves, activeDraftStartingPlayers, activeDraftSubstitutes, activeSlot]);
+  }, [activeDraft, activeDraftStartingPlayers, activeDraftSubstitutes, activeSlot]);
   const activeSlotReadyToSave = Boolean(
     activeSlotPreview &&
     activeDraft &&
     activeDraft.teamName.trim().length > 0 &&
     getRosterCount(activeDraft.startingXI) === 11 &&
     getRosterCount(activeDraft.substitutes) === 7 &&
-    getRosterCount(activeDraft.reserves) === 5 &&
     activeDraft.captainId,
   );
   const activeSlotExceedsPowerLimit = Boolean(activeSlotPreview && powerCap && activeSlotPreview.rating > powerCap);
@@ -886,7 +894,7 @@ export default function MultiplayerLeague({
   };
 
   const getPickCompletionPatch = (nextTotal: number): Partial<SlotDraft> => {
-    if (!activeDraft?.autoRoll || nextTotal >= 23) return { pickAvailable: false };
+    if (!activeDraft?.autoRoll || nextTotal >= draftTargetTotal) return { pickAvailable: false };
     const nextSquad = getRandomDraftSquad(activeDraft.rolledSquadId);
     return nextSquad
       ? { rolledSquadId: nextSquad.id, pickAvailable: true }
@@ -894,7 +902,7 @@ export default function MultiplayerLeague({
   };
 
   const getInvitePickCompletionPatch = (nextTotal: number): Partial<InviteDraft> => {
-    if (!inviteDraft.autoRoll || nextTotal >= 23) return { pickAvailable: false };
+    if (!inviteDraft.autoRoll || nextTotal >= draftTargetTotal) return { pickAvailable: false };
     const nextSquad = getRandomDraftSquad(inviteDraft.rolledSquadId);
     return nextSquad
       ? { rolledSquadId: nextSquad.id, pickAvailable: true }
@@ -907,7 +915,7 @@ export default function MultiplayerLeague({
       setResultNotice('error', 'Kadro kurmak için önce takım adı gir.');
       return;
     }
-    if (activeDraftTotal >= 23) return;
+    if (activeDraftTotal >= draftTargetTotal) return;
     if (activeDraft.pickAvailable) return;
     if (draftSquads.length === 0) return;
 
@@ -926,7 +934,7 @@ export default function MultiplayerLeague({
       setResultNotice('error', 'Kadro kurmak için önce takım adı gir.');
       return;
     }
-    if (inviteDraftTotal >= 23) return;
+    if (inviteDraftTotal >= draftTargetTotal) return;
     if (inviteDraft.pickAvailable) return;
     if (draftSquads.length === 0) return;
 
@@ -1003,7 +1011,7 @@ export default function MultiplayerLeague({
       : removeRosterPlayer(activeDraft, pendingPlacementPlayer.id);
     const currentIds = compactIds(baseDraft[target]);
     if (currentIds.length >= rosterTargetLimits[target]) {
-      setResultNotice('error', `${target === 'substitutes' ? 'Yedek' : 'Rezerv'} slotlari dolu.`);
+      setResultNotice('error', 'Yedek slotlari dolu.');
       return;
     }
     const nextDraft = addRosterPlayer(baseDraft, pendingPlacementPlayer.id, target, slotIndex);
@@ -1045,35 +1053,35 @@ export default function MultiplayerLeague({
   };
 
   const importQuickTeamToActiveSlot = () => {
-    if (!activeDraft || !formation || !tactic || !captainId || startingPlayers.length !== 11) {
-      setResultNotice('error', 'Aktarmak icin Hızlı Oyna kadrosunda 11 oyuncu, dizilis, taktik ve kaptan gerekli.');
+    const quickStartingIds = selectedPlayers.map((player) => player?.id ?? '');
+    if (!activeDraft || !formation || !tactic || !captainId || startingPlayers.length !== 11 || !quickStartingIds.includes(captainId)) {
+      setResultNotice('error', 'Hizli Oyna kadron gecerli degil. Once 11 oyuncu, 7 yedek, dizilis, taktik ve kaptan sec.');
       return;
     }
 
-    const importedIds = selectedPlayers.map((player) => player?.id ?? '');
-    const importedSet = new Set(importedIds.filter((id) => id.trim().length > 0));
+    const importedSet = new Set(quickStartingIds.filter((id) => id.trim().length > 0));
     const importedSubstitutes = substitutePlayers
       .map((player) => player.id)
       .filter((id) => !importedSet.has(id))
       .slice(0, 7);
-    const quickReserveIds = quickReservePlayers
-      .map((player) => player.id)
-      .filter((id) => !importedSet.has(id) && !importedSubstitutes.includes(id))
-      .slice(0, 5);
+    if (importedSubstitutes.length !== 7) {
+      setResultNotice('error', 'Hizli Oyna kadron gecerli degil. 7 yedek olusturulamadi.');
+      return;
+    }
     updateActiveDraft({
       teamName: activeDraft.teamName.trim() || squadName,
       formation,
       tactic,
       captainId,
-      startingXI: normalizeStartingSlots(importedIds),
+      startingXI: normalizeStartingSlots(quickStartingIds),
       substitutes: importedSubstitutes,
-      reserves: quickReserveIds,
+      reserves: [],
       pickAvailable: false,
       rolledSquadId: null,
     });
     setPendingPlacementPlayerId(null);
     setPendingPlacementSource(null);
-    setResultNotice('success', 'Hızlı Oyna ilk 11 Arkadaş Ligi slotuna aktarıldı. Yedek ve rezervleri draft ile tamamla.');
+    setResultNotice('success', 'Hizli Oyna kadrosu ilk 11 ve yedeklere aktarildi.');
   };
 
   const handleSaveActiveSlot = () => {
@@ -1082,7 +1090,7 @@ export default function MultiplayerLeague({
       const input: PlayerSlotTeamInput = {
         ...activeSlotPreview,
         displayName: activeDraft.displayName,
-        reserves: compactIds(activeDraft.reserves),
+        reserves: [],
       };
       const league = savePlayerSlotToLeague(activeLeague.id, activeSlot.id, input);
       refreshLeagues(league.id);
@@ -1137,7 +1145,8 @@ export default function MultiplayerLeague({
         setResultNotice('error', 'Bu mevki slotu dolu. Once oyuncuyu cikar veya baska slota tasi.');
         return;
       }
-      const currentFormation = FORMATIONS.find((item) => item.id === inviteDraft.formation);
+      const currentFormationId = inviteDraft.formation ?? '4-2-3-1';
+      const currentFormation = FORMATIONS.find((item) => item.id === currentFormationId);
       const slot = currentFormation?.positions.find((item) => item.index === slotIndex);
       if (!slot || !isPositionCompatible(invitePlacementPlayer, slot.allowedPosition)) {
         setResultNotice('error', 'Bu oyuncu bu mevkide oynayamaz.');
@@ -1152,7 +1161,7 @@ export default function MultiplayerLeague({
       ? []
       : compactIds(baseDraft[target]);
     if (target !== 'startingXI' && currentIds.length >= rosterTargetLimits[target]) {
-      setResultNotice('error', `${target === 'substitutes' ? 'Yedek' : 'Rezerv'} slotlari dolu.`);
+      setResultNotice('error', 'Yedek slotlari dolu.');
       return;
     }
 
@@ -1160,6 +1169,7 @@ export default function MultiplayerLeague({
     const nextTotal = inviteDraftTotal + (fromPool || fromDraft ? 1 : 0);
     setInviteDraft({
       ...nextDraft,
+      formation: nextDraft.formation ?? '4-2-3-1',
       ...(fromDraft ? getInvitePickCompletionPatch(nextTotal) : {}),
       captainId: nextDraft.captainId ?? (target === 'startingXI' ? invitePlacementPlayer.id : null),
     });
@@ -1173,8 +1183,8 @@ export default function MultiplayerLeague({
 
   const importQuickTeamToInviteDraft = () => {
     const quickStartingIds = selectedPlayers.map((player) => player?.id ?? '');
-    if (!formation || !tactic || !captainId || startingPlayers.length !== 11 || !quickStartingIds.includes(captainId)) {
-      setResultNotice('error', 'Hızlı Oyna kadron geçerli değil. Önce Hızlı Oyna’da 11 oyuncu, diziliş, taktik ve kaptan seç.');
+    if (!formation || !tactic || !captainId || startingPlayers.length !== 11 || substitutePlayers.length < 7 || !quickStartingIds.includes(captainId)) {
+      setResultNotice('error', 'Hizli Oyna kadron gecerli degil. Once 11 oyuncu, 7 yedek, dizilis, taktik ve kaptan sec.');
       return;
     }
     setInviteDraft({
@@ -1182,7 +1192,7 @@ export default function MultiplayerLeague({
       teamName: inviteDraft.teamName.trim() || quickInviteDraft.teamName,
     });
     setInvitePlacement(null);
-    setResultNotice('success', 'Hizli Oyna kadrosu sahaya ve yedeklere aktarildi.');
+    setResultNotice('success', 'Hizli Oyna kadrosu ilk 11 ve yedeklere aktarildi.');
   };
 
   const handleCreateLeague = async () => {
@@ -1194,6 +1204,7 @@ export default function MultiplayerLeague({
           ownerId: owner.id,
           maxUsers,
           powerLimit,
+          competitionId: friendCompetitionId,
         });
         refreshOnlineLeague(league);
         setActiveLeagueId(league.id);
@@ -1205,6 +1216,7 @@ export default function MultiplayerLeague({
         ownerId: owner.id,
         maxUsers,
         powerLimit,
+        competitionId: friendCompetitionId,
       });
       refreshLeagues(league.id);
       setActiveLeagueId(league.id);
@@ -1433,6 +1445,20 @@ export default function MultiplayerLeague({
                 className="border-2 border-black bg-zinc-100 px-3 py-3 text-xs font-black uppercase outline-none"
                 placeholder="Lig adı"
               />
+              <label className="grid gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-black/60">
+                Takim sayisi
+                <input
+                  type="number"
+                  min={2}
+                  max={18}
+                  value={maxUsers}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    setMaxUsers(Math.min(18, Math.max(2, Math.round(Number.isFinite(nextValue) ? nextValue : 2))));
+                  }}
+                  className="border-2 border-black bg-zinc-100 px-3 py-3 text-sm font-black uppercase text-black outline-none"
+                />
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 {maxUserOptions.map((option) => (
                   <button
@@ -1442,6 +1468,20 @@ export default function MultiplayerLeague({
                     className={`game-button border-2 border-black px-3 py-3 text-xs font-black uppercase ${maxUsers === option ? 'bg-black text-white' : 'bg-zinc-100 text-black'}`}
                   >
                     {option} Takım
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-black/60">Oyuncu havuzu</p>
+                {friendCompetitionOptions.map((competition) => (
+                  <button
+                    key={competition.competitionId}
+                    type="button"
+                    onClick={() => setFriendCompetitionId(competition.competitionId)}
+                    className={`game-button border-2 border-black px-3 py-3 text-left text-xs font-black uppercase ${friendCompetitionId === competition.competitionId ? 'bg-yellow-400 text-black' : 'bg-zinc-100 text-black'}`}
+                  >
+                    <span className="block">{competition.competitionName}</span>
+                    <span className="mt-1 block text-[9px] opacity-60">{competition.teams.length} takimlik havuz</span>
                   </button>
                 ))}
               </div>
@@ -1584,18 +1624,19 @@ export default function MultiplayerLeague({
                       <div className="space-y-3">
                         <div className="flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.16em] text-white/70">
                           <span>Kadro ilerlemesi</span>
-                          <span>{activeDraftTotal}/23</span>
+                          <span>{activeDraftTotal}/{draftTargetTotal}</span>
                         </div>
                         <div className="h-3 border-2 border-black bg-black/55">
                           <div
                             className="h-full bg-gradient-to-r from-yellow-400 to-green-500"
-                            style={{ width: `${Math.min(100, (activeDraftTotal / 23) * 100)}%` }}
+                            style={{ width: `${Math.min(100, (activeDraftTotal / draftTargetTotal) * 100)}%` }}
                           />
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                           <DraftCounter label="Ilk 11" value={`${getRosterCount(activeDraft.startingXI)}/11`} />
                           <DraftCounter label="Yedek" value={`${getRosterCount(activeDraft.substitutes)}/7`} />
-                          <DraftCounter label="Rezerv" value={`${getRosterCount(activeDraft.reserves)}/5`} />
+                          <DraftCounter label="Guc" value={activeSlotPreview?.rating ?? '-'} />
+                          <DraftCounter label="Kimya" value={activeSlotPreview?.chemistry ?? '-'} />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-[120px_160px] xl:grid-cols-1">
@@ -1606,7 +1647,7 @@ export default function MultiplayerLeague({
                           disabled={!draftReady}
                           className="game-button flex items-center justify-center gap-2 border-2 border-black bg-yellow-400 px-4 py-4 text-xs font-black uppercase text-black disabled:opacity-35"
                         >
-                          Hızlı Oyna İlk 11 Aktar
+                          HIZLI OYNA KADROSUNU AKTAR
                         </button>
                         <button
                           type="button"
@@ -1814,10 +1855,9 @@ export default function MultiplayerLeague({
                           </div>
 
                           <div className="mt-4 grid gap-3 md:grid-cols-5">
-                            <MiniStat dark label="Toplam" value={`${activeDraftTotal}/23`} />
+                            <MiniStat dark label="Toplam" value={`${activeDraftTotal}/${draftTargetTotal}`} />
                             <MiniStat dark label="İlk 11" value={`${activeDraft.startingXI.length}/11`} />
                             <MiniStat dark label="Yedek" value={`${activeDraft.substitutes.length}/7`} />
-                            <MiniStat dark label="Rezerv" value={`${activeDraft.reserves.length}/5`} />
                             <MiniStat dark label="Güç" value={activeSlotPreview?.rating ?? '-'} />
                           </div>
 
@@ -1845,14 +1885,6 @@ export default function MultiplayerLeague({
                                 onCaptain={() => undefined}
                                 onRemove={removePlayerFromDraft}
                               />
-                              <DraftRosterList
-                                title="Rezerv"
-                                ids={activeDraft.reserves}
-                                playerById={playerById}
-                                captainId={null}
-                                onCaptain={() => undefined}
-                                onRemove={removePlayerFromDraft}
-                              />
                             </div>
 
                             <div className="border-2 border-white/15 bg-white/5 p-3">
@@ -1864,13 +1896,13 @@ export default function MultiplayerLeague({
                                       {activeRolledSquad?.teamName ?? 'Takım bekleniyor'}
                                     </h4>
                                     <p className="mt-1 text-[10px] font-black uppercase text-white/45">
-                                      {activeDraft.pickAvailable ? '1 oyuncu seç' : activeDraftTotal >= 23 ? 'Kadro tamamlandı' : 'Yeni takım çevrilebilir'}
+                                      {activeDraft.pickAvailable ? '1 oyuncu seç' : activeDraftTotal >= draftTargetTotal ? 'Kadro tamamlandı' : 'Yeni takım çevrilebilir'}
                                     </p>
                                   </div>
                                   <button
                                     type="button"
                                     onClick={rollActiveSquad}
-                                    disabled={!activeDraft.teamName.trim() || activeDraft.pickAvailable || activeDraftTotal >= 23}
+                                    disabled={!activeDraft.teamName.trim() || activeDraft.pickAvailable || activeDraftTotal >= draftTargetTotal}
                                     className="game-button flex items-center gap-2 border-2 border-black bg-yellow-400 px-3 py-3 text-[10px] font-black uppercase text-black disabled:opacity-35"
                                   >
                                     <RefreshCw size={15} /> Takım Çevir
@@ -1982,7 +2014,7 @@ export default function MultiplayerLeague({
                           onClick={importQuickTeamToInviteDraft}
                           className="game-button border-2 border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase text-white"
                         >
-                          HÄ±zlÄ± Oyna Kadrosunu Aktar
+                          HIZLI OYNA KADROSUNU AKTAR
                         </button>
                         <button
                           type="button"
@@ -1998,8 +2030,8 @@ export default function MultiplayerLeague({
                     <div className="mt-4 grid gap-3 md:grid-cols-4">
                       <MiniStat dark label="İlk 11" value={`${getRosterCount(inviteDraft.startingXI)}/11`} />
                       <MiniStat dark label="Yedek" value={`${getRosterCount(inviteDraft.substitutes)}/7`} />
-                      <MiniStat dark label="Rezerv" value={`${getRosterCount(inviteDraft.reserves)}/5`} />
-                      <MiniStat dark label="Güç" value={teamPreview?.rating ?? '-'} />
+                      <MiniStat dark label="Guc" value={teamPreview?.rating ?? '-'} />
+                      <MiniStat dark label="Kimya" value={teamPreview?.chemistry ?? '-'} />
                     </div>
 
                     <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1.2fr]">
@@ -2450,7 +2482,7 @@ function DraftRollPanel({
         <button
           type="button"
           onClick={onRoll}
-          disabled={!draft.teamName.trim() || draft.pickAvailable || activeTotal >= 23}
+          disabled={!draft.teamName.trim() || draft.pickAvailable || activeTotal >= draftTargetTotal}
           className="game-button mt-4 flex w-full items-center justify-center gap-2 border-2 border-black bg-yellow-400 px-4 py-4 text-xs font-black uppercase text-black disabled:opacity-35"
         >
           <RefreshCw size={16} /> {rolledSquad ? 'Baska Takim Getir' : 'Takim Cevir'}
@@ -2526,7 +2558,7 @@ function SelectedPlacementPanel({
           <div className="mt-3">
             <PremiumPlayerCard player={player} team={team} active />
             <p className="mt-3 border border-yellow-400 bg-yellow-400/10 p-3 text-xs font-black uppercase text-yellow-100">
-              Hangi mevkiye yerlestirmek istiyorsun? Sagdaki saha, yedek veya rezerv slotuna dokun.
+              Hangi mevkiye yerlestirmek istiyorsun? Saha slotuna dokun veya yedek slotuna ekle.
             </p>
           </div>
         ) : (
@@ -2638,18 +2670,6 @@ function FriendPitchBoard({
         onPlace={onPlace}
         onRemove={onRemove}
       />
-      <BenchSlotGrid
-        title="Rezerv"
-        target="reserves"
-        limit={rosterTargetLimits.reserves}
-        ids={draft.reserves}
-        playerById={playerById}
-        pendingPlayer={pendingPlayer}
-        selectedPlayerId={selectedPlayerId}
-        onSelect={onSelect}
-        onPlace={onPlace}
-        onRemove={onRemove}
-      />
     </section>
   );
 }
@@ -2728,7 +2748,8 @@ function PitchSlotButton({
         <button
           type="button"
           onClick={() => onPlace('startingXI', slot.index)}
-          disabled={!pendingPlayer || !compatible}
+          disabled={!pendingPlayer}
+          aria-disabled={Boolean(pendingPlayer && !compatible)}
           className={`game-button flex h-full w-full flex-col items-center justify-center border-2 border-dashed text-[10px] font-black uppercase transition-all disabled:cursor-not-allowed ${
             pendingPlayer && compatible
               ? 'border-yellow-400 bg-yellow-400/30 text-white shadow-[0_0_15px_#eab308]'

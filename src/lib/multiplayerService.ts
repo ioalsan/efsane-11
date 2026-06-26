@@ -24,7 +24,7 @@ import {
 import type { Player, SeasonDataset, SeasonTeam } from '@/types';
 
 export type MultiplayerLeagueStatus = 'waiting' | 'active' | 'completed';
-export type MultiplayerMaxUsers = 4 | 8 | 12 | 18;
+export type MultiplayerMaxUsers = number;
 export type MultiplayerPowerLimit = 'free' | 'balanced' | 'max80' | 'max85';
 export type MultiplayerLeagueMode = 'invite' | 'local-friends';
 
@@ -133,6 +133,7 @@ export interface CreateLeagueInput {
   ownerId: string;
   maxUsers: MultiplayerMaxUsers;
   powerLimit: MultiplayerPowerLimit;
+  competitionId?: string;
 }
 
 export interface CreateLocalFriendLeagueInput {
@@ -163,8 +164,10 @@ const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).sli
 
 const normalizeInviteCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+const clampLeagueTeamCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
+
 const isValidMaxUsers = (value: number): value is MultiplayerMaxUsers => (
-  value === 4 || value === 8 || value === 12 || value === 18
+  Number.isInteger(value) && value >= 2 && value <= 18
 );
 
 const clampFriendCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
@@ -412,64 +415,6 @@ export const getRealTeamReplacementPlan = (
   };
 };
 
-const buildBotCandidateList = (
-  dataset: SeasonDataset,
-  powerLimit: MultiplayerPowerLimit,
-  competitionId = DEFAULT_COMPETITION_ID,
-) => {
-  const cap = getPowerLimitCap(powerLimit);
-  const candidates = getCompetitionTeams(competitionId, dataset)
-    .map((team) => {
-      const players = getTeamPlayers(team.id, dataset)
-        .sort((a, b) => b.rating + b.form - (a.rating + a.form))
-        .slice(0, 18);
-      return {
-        team,
-        players,
-        rating: getRealTeamRating(team, players),
-      };
-    })
-    .filter((item) => item.players.length >= 11);
-
-  if (!cap) return candidates.sort((a, b) => b.rating - a.rating);
-
-  const underCap = candidates
-    .filter((item) => item.rating <= cap)
-    .sort((a, b) => b.rating - a.rating);
-  const overCap = candidates
-    .filter((item) => item.rating > cap)
-    .sort((a, b) => Math.abs(a.rating - cap) - Math.abs(b.rating - cap));
-
-  return [...underCap, ...overCap];
-};
-
-const createBotTeams = (
-  league: MultiplayerLeague,
-  dataset: SeasonDataset,
-): MultiplayerTeam[] => {
-  const needed = Math.max(0, league.maxUsers - league.teams.length);
-  const candidates = buildBotCandidateList(dataset, league.powerLimit, league.competitionId ?? DEFAULT_COMPETITION_ID);
-  const createdAt = now();
-
-  return candidates.slice(0, needed).map((item, index) => ({
-    id: `bot-${league.id}-${item.team.id}-${index + 1}`,
-    ownerId: 'bot',
-    teamName: item.team.name,
-    formation: '4-2-3-1',
-    tactic: 'Balanced',
-    captainId: item.players[0]?.id ?? null,
-    startingXI: item.players.slice(0, 11).map((player) => player.id),
-    substitutes: item.players.slice(11, 18).map((player) => player.id),
-    reserves: item.players.slice(18, 23).map((player) => player.id),
-    rating: item.rating,
-    chemistry: 72,
-    isBot: true,
-    sourceTeamId: item.team.id,
-    createdAt,
-    updatedAt: createdAt,
-  }));
-};
-
 const createRealLeagueTeams = (
   realTeams: MultiplayerRealTeam[],
   dataset: SeasonDataset,
@@ -557,6 +502,7 @@ export const createLeague = ({
   ownerId,
   maxUsers,
   powerLimit,
+  competitionId = DEFAULT_COMPETITION_ID,
 }: CreateLeagueInput) => {
   const leagues = readLeagues();
   const createdAt = now();
@@ -567,7 +513,8 @@ export const createLeague = ({
     name: name.trim().slice(0, 36) || 'Canli11 Multiplayer Ligi',
     ownerId,
     inviteCode: createInviteCode(new Set(leagues.map((item) => item.inviteCode))),
-    maxUsers,
+    competitionId,
+    maxUsers: clampLeagueTeamCount(maxUsers),
     powerLimit,
     playerSlots: [],
     teams: [],
@@ -685,7 +632,6 @@ export const savePlayerSlotToLeague = (
   if (!input.teamName.trim()) throw new Error('Takim adi zorunlu.');
   if (input.startingXI.length !== 11) throw new Error('Ilk 11 tamamlanmadi.');
   if (input.substitutes.length !== 7) throw new Error('7 yedek secilmeli.');
-  if (input.reserves.length !== 5) throw new Error('5 rezerv secilmeli.');
   if (!input.captainId || !input.startingXI.includes(input.captainId)) {
     throw new Error('Kaptan ilk 11 icinden secilmeli.');
   }
@@ -749,6 +695,7 @@ export const saveTeamToLeague = (
     throw new Error(`Takim ortalamasi ${cap} limitini asiyor.`);
   }
   if (input.startingXI.length !== 11) throw new Error('Ilk 11 tamamlanmadi.');
+  if (input.substitutes.length !== 7) throw new Error('7 yedek secilmeli.');
   if (!input.captainId || !input.startingXI.includes(input.captainId)) throw new Error('Kaptan ilk 11 icinden secilmeli.');
 
   const existingIndex = league.teams.findIndex((team) => team.ownerId === input.ownerId);
@@ -796,7 +743,9 @@ export const startLeague = (
   if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
   if (league.teams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
 
-  const botTeams = createBotTeams(league, dataset);
+  const neededRealTeams = Math.max(0, league.maxUsers - league.teams.length);
+  const plan = getRealTeamReplacementPlan(league.teams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
+  const botTeams = createRealLeagueTeams(plan.realTeams.slice(0, neededRealTeams), dataset, league.id);
   const allTeams = [...league.teams, ...botTeams].slice(0, league.maxUsers);
   const teamIds = allTeams.map((team) => team.id);
   const fixtures = generateRoundRobin(teamIds, true);
@@ -804,6 +753,8 @@ export const startLeague = (
   return saveLeague({
     ...league,
     botTeams,
+    realTeams: plan.realTeams.slice(0, neededRealTeams),
+    replacedTeams: plan.replacedTeams,
     fixtures,
     standings: createStandingRows(teamIds, allTeams, fixtures),
     status: 'active',

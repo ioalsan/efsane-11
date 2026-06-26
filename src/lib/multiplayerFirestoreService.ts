@@ -25,13 +25,13 @@ import {
 import { getCaptainRole } from './captain';
 import {
   DEFAULT_COMPETITION_ID,
-  getCompetitionTeams,
   getSeasonDataset,
   getTeamPlayers,
   toLegacyPlayer,
 } from './seasonRepository';
 import { ensureAnonymousUser, getFirebaseClient, isFirebaseConfigured } from './firebase';
 import {
+  getRealTeamReplacementPlan,
   getPowerLimitCap,
   type MultiplayerLeague,
   type MultiplayerMatchReport,
@@ -42,7 +42,7 @@ import {
   type MultiplayerTeamInput,
   type SimulateWeekResult,
 } from './multiplayerService';
-import type { Player, SeasonDataset, SeasonTeam } from '@/types';
+import type { Player, SeasonDataset } from '@/types';
 
 const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -51,6 +51,8 @@ const now = () => new Date().toISOString();
 const clean = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const normalizeInviteCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+const clampLeagueTeamCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
 
 const finalScore = (fixture: CompetitionFixture) => fixture.result?.extraTime ?? fixture.result?.normalTime ?? null;
 
@@ -94,68 +96,36 @@ const getPlayerMap = (dataset: SeasonDataset) => new Map(
   }),
 );
 
-const getRealTeamRating = (team: SeasonTeam, players: ReturnType<typeof getTeamPlayers>) => {
-  if (players.length === 0) return 72 + team.strengthBonus;
-  const average = players.reduce((total, player) => total + player.rating + player.form * 0.3, 0) / players.length;
-  return Math.max(55, Math.min(96, Math.round(average + team.strengthBonus)));
-};
-
-const buildBotCandidateList = (
+const createRealLeagueTeams = (
+  realTeams: MultiplayerLeague['realTeams'],
   dataset: SeasonDataset,
-  powerLimit: MultiplayerPowerLimit,
-  competitionId = DEFAULT_COMPETITION_ID,
-) => {
-  const cap = getPowerLimitCap(powerLimit);
-  const candidates = getCompetitionTeams(competitionId, dataset)
-    .map((team) => {
-      const players = getTeamPlayers(team.id, dataset)
-        .sort((a, b) => b.rating + b.form - (a.rating + a.form))
-        .slice(0, 18);
-      return {
-        team,
-        players,
-        rating: getRealTeamRating(team, players),
-      };
-    })
-    .filter((item) => item.players.length >= 11);
-
-  if (!cap) return candidates.sort((a, b) => b.rating - a.rating);
-
-  const underCap = candidates
-    .filter((item) => item.rating <= cap)
-    .sort((a, b) => b.rating - a.rating);
-  const overCap = candidates
-    .filter((item) => item.rating > cap)
-    .sort((a, b) => Math.abs(a.rating - cap) - Math.abs(b.rating - cap));
-
-  return [...underCap, ...overCap];
-};
-
-const createBotTeams = (
-  league: MultiplayerLeague,
-  dataset: SeasonDataset,
+  leagueId: string,
 ): MultiplayerTeam[] => {
-  const needed = Math.max(0, league.maxUsers - league.teams.length);
-  const candidates = buildBotCandidateList(dataset, league.powerLimit, league.competitionId ?? DEFAULT_COMPETITION_ID);
   const createdAt = now();
+  return realTeams.map((realTeam, index) => {
+    const sourceTeam = dataset.teams.find((team) => team.id === realTeam.sourceTeamId);
+    const players = getTeamPlayers(realTeam.sourceTeamId, dataset)
+      .sort((a, b) => b.rating + b.form - (a.rating + a.form))
+      .slice(0, 23);
 
-  return candidates.slice(0, needed).map((item, index) => ({
-    id: `bot-${league.id}-${item.team.id}-${index + 1}`,
-    ownerId: 'bot',
-    teamName: item.team.name,
-    formation: '4-2-3-1',
-    tactic: 'Balanced',
-    captainId: item.players[0]?.id ?? null,
-    startingXI: item.players.slice(0, 11).map((player) => player.id),
-    substitutes: item.players.slice(11, 18).map((player) => player.id),
-    reserves: item.players.slice(18, 23).map((player) => player.id),
-    rating: item.rating,
-    chemistry: 72,
-    isBot: true,
-    sourceTeamId: item.team.id,
-    createdAt,
-    updatedAt: createdAt,
-  }));
+    return {
+      id: `real-${leagueId}-${realTeam.sourceTeamId}-${index + 1}`,
+      ownerId: 'real-team',
+      teamName: sourceTeam?.name ?? realTeam.teamName,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0]?.id ?? null,
+      startingXI: players.slice(0, 11).map((player) => player.id),
+      substitutes: players.slice(11, 18).map((player) => player.id),
+      reserves: players.slice(18, 23).map((player) => player.id),
+      rating: realTeam.rating,
+      chemistry: 72,
+      isBot: true,
+      sourceTeamId: realTeam.sourceTeamId,
+      createdAt,
+      updatedAt: createdAt,
+    };
+  });
 };
 
 const toCompetitionTeam = (
@@ -285,11 +255,13 @@ export const createLeague = async ({
   name,
   maxUsers,
   powerLimit,
+  competitionId = DEFAULT_COMPETITION_ID,
 }: {
   name: string;
   ownerId: string;
   maxUsers: MultiplayerMaxUsers;
   powerLimit: MultiplayerPowerLimit;
+  competitionId?: string;
 }) => {
   const { db, user } = await getFirebaseOrThrow();
   const createdAt = now();
@@ -301,8 +273,8 @@ export const createLeague = async ({
     name: name.trim().slice(0, 36) || 'Canli11 Davetli Lig',
     ownerId: user.uid,
     inviteCode: createInviteCode(),
-    competitionId: DEFAULT_COMPETITION_ID,
-    maxUsers,
+    competitionId,
+    maxUsers: clampLeagueTeamCount(maxUsers),
     powerLimit,
     playerSlots: [],
     teams: [],
@@ -368,6 +340,7 @@ export const saveTeamToLeague = async (
   const cap = getPowerLimitCap(league.powerLimit);
   if (cap && input.rating > cap) throw new Error(`Takim ortalamasi ${cap} limitini asiyor.`);
   if (input.startingXI.length !== 11) throw new Error('Ilk 11 tamamlanmadi.');
+  if (input.substitutes.length !== 7) throw new Error('7 yedek secilmeli.');
   if (!input.captainId || !input.startingXI.includes(input.captainId)) {
     throw new Error('Kaptan ilk 11 icinden secilmeli.');
   }
@@ -419,13 +392,17 @@ export const startLeague = async (
   if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
   if (league.teams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
 
-  const botTeams = createBotTeams(league, dataset);
+  const neededRealTeams = Math.max(0, league.maxUsers - league.teams.length);
+  const plan = getRealTeamReplacementPlan(league.teams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
+  const botTeams = createRealLeagueTeams(plan.realTeams.slice(0, neededRealTeams), dataset, league.id);
   const allTeams = [...league.teams, ...botTeams].slice(0, league.maxUsers);
   const teamIds = allTeams.map((team) => team.id);
   const fixtures = generateRoundRobin(teamIds, true);
   const nextLeague: MultiplayerLeague = {
     ...league,
     botTeams,
+    realTeams: plan.realTeams.slice(0, neededRealTeams),
+    replacedTeams: plan.replacedTeams,
     fixtures,
     standings: createStandingRows(teamIds, allTeams, fixtures),
     status: 'active',
