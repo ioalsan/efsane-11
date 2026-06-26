@@ -12,6 +12,7 @@ import {
   where,
   writeBatch,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import {
   calculateStandings,
@@ -58,6 +59,7 @@ type FirestoreFixtureDoc = CompetitionFixture & {
 const normalizeInviteCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 const clampLeagueTeamCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
+const INVITE_LEAGUE_TOTAL_TEAMS = 18;
 
 const finalScore = (fixture: CompetitionFixture) => fixture.result?.extraTime ?? fixture.result?.normalTime ?? null;
 
@@ -384,8 +386,8 @@ const saveLeagueDoc = async (db: Firestore, league: MultiplayerLeague, memberIds
     ...league,
     updatedAt: now(),
   };
-  await setDoc(leagueRef(db, league.id), toFirestoreLeagueDoc(nextLeague, memberIds), { merge: true });
   await persistLeagueSubcollections(db, nextLeague);
+  await setDoc(leagueRef(db, league.id), toFirestoreLeagueDoc(nextLeague, memberIds), { merge: true });
   return nextLeague;
 };
 
@@ -527,11 +529,16 @@ export const startLeague = async (
   if (league.ownerId !== user.uid) throw new Error('Sezonu sadece lig sahibi baslatabilir.');
   if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
   if (league.teams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
+  if (league.teams.length < league.maxUsers) {
+    throw new Error(`Sezonu baslatmak icin ${league.maxUsers} kullanici takimi gerekli.`);
+  }
+  if (league.teams.length > INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimdan fazla kullanici takimi olamaz.');
 
-  const neededRealTeams = Math.max(0, league.maxUsers - league.teams.length);
+  const neededRealTeams = Math.max(0, INVITE_LEAGUE_TOTAL_TEAMS - league.teams.length);
   const plan = getRealTeamReplacementPlan(league.teams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
   const botTeams = createRealLeagueTeams(plan.realTeams.slice(0, neededRealTeams), dataset, league.id);
-  const allTeams = [...league.teams, ...botTeams].slice(0, league.maxUsers);
+  const allTeams = [...league.teams, ...botTeams].slice(0, INVITE_LEAGUE_TOTAL_TEAMS);
+  if (allTeams.length !== INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimlik lig havuzu olusturulamadi.');
   const teamIds = allTeams.map((team) => team.id);
   const fixtures = generateRoundRobin(teamIds, true);
   const nextLeague: MultiplayerLeague = {
@@ -640,14 +647,64 @@ export const subscribeOnlineLeagues = (
   if (!client || !isFirebaseConfigured()) return () => undefined;
 
   const q = query(collection(client.db, 'leagues'), where('memberIds', 'array-contains', userId));
-  return onSnapshot(q, async (snapshot) => {
+  const leagueDocs = new Map<string, Record<string, unknown>>();
+  const subcollectionUnsubscribers = new Map<string, Unsubscribe[]>();
+  let disposed = false;
+  let emitVersion = 0;
+
+  const emitLeagues = async () => {
+    const version = emitVersion + 1;
+    emitVersion = version;
     try {
       const leagues = await Promise.all(
-        snapshot.docs.map((item) => hydrateLeague(client.db, item.id, item.data())),
+        [...leagueDocs.entries()].map(([leagueId, data]) => hydrateLeague(client.db, leagueId, data)),
       );
-      callback(leagues.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+      if (!disposed && version === emitVersion) {
+        callback(leagues.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+      }
     } catch (error) {
       onError?.(error);
     }
+  };
+
+  const watchLeagueSubcollections = (leagueId: string) => {
+    if (subcollectionUnsubscribers.has(leagueId)) return;
+    const subcollections = ['teams', 'fixtures', 'standings', 'matchReports'];
+    const unsubscribers = subcollections.map((name) => onSnapshot(
+      collection(client.db, 'leagues', leagueId, name),
+      () => {
+        void emitLeagues();
+      },
+      onError,
+    ));
+    subcollectionUnsubscribers.set(leagueId, unsubscribers);
+  };
+
+  const unsubscribeMain = onSnapshot(q, (snapshot) => {
+    const activeLeagueIds = new Set(snapshot.docs.map((item) => item.id));
+
+    [...subcollectionUnsubscribers.entries()].forEach(([leagueId, unsubscribers]) => {
+      if (activeLeagueIds.has(leagueId)) return;
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      subcollectionUnsubscribers.delete(leagueId);
+      leagueDocs.delete(leagueId);
+    });
+
+    snapshot.docs.forEach((item) => {
+      leagueDocs.set(item.id, item.data());
+      watchLeagueSubcollections(item.id);
+    });
+
+    void emitLeagues();
   }, onError);
+
+  return () => {
+    disposed = true;
+    unsubscribeMain();
+    subcollectionUnsubscribers.forEach((unsubscribers) => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    });
+    subcollectionUnsubscribers.clear();
+    leagueDocs.clear();
+  };
 };

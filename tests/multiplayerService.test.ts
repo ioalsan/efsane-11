@@ -106,7 +106,7 @@ test('cleans corrupt multiplayer roster saves with empty first eleven and filled
   assert.equal(consumeMultiplayerMigrationNotice(), false);
 });
 
-test('invite league supports manual 2-18 team counts with matching fixtures', () => {
+test('invite league user team count fills the season to 18 teams', () => {
   const dataset = getSeasonDataset();
   const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
     .filter((team) => getTeamPlayers(team.id, dataset).length >= 18);
@@ -140,17 +140,47 @@ test('invite league supports manual 2-18 team counts with matching fixtures', ()
 
     const started = startLeague(nextLeague.id, 'owner-1', dataset);
     const replacementPlan = getRealTeamReplacementPlan(teamCount, dataset);
-    const expectedWeekCount = (teamCount % 2 === 0 ? teamCount - 1 : teamCount) * 2;
 
     assert.equal(started.teams.length, teamCount);
-    assert.equal(started.botTeams.length, 0);
-    assert.equal(started.fixtures.length, expectedWeekCount);
-    assert.equal(started.fixtures.flat().length, teamCount * (teamCount - 1));
+    assert.equal(started.botTeams.length, 18 - teamCount);
+    assert.equal(started.realTeams.length, 18 - teamCount);
+    assert.equal(started.teams.length + started.botTeams.length, 18);
+    assert.equal(started.fixtures.length, 34);
+    assert.equal(started.fixtures.flat().length, 306);
     assert.deepEqual(
       started.replacedTeams.map((team) => team.sourceTeamId),
       replacementPlan.replacedTeams.map((team) => team.sourceTeamId),
     );
   });
+});
+
+test('invite league waits for the selected user team count before starting', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const sourceTeam = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .find((team) => getTeamPlayers(team.id, dataset).length >= 18);
+  assert.ok(sourceTeam);
+
+  const league = createLeague({
+    name: 'Iki Kullanici Bekleme',
+    ownerId: 'owner-1',
+    maxUsers: 2,
+    powerLimit: 'free',
+  });
+  const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+  const input = buildMultiplayerTeamInput({
+    ownerId: 'user-1',
+    teamName: 'Tek Takim',
+    formation: '4-2-3-1',
+    tactic: 'Balanced',
+    captainId: players[0].id,
+    startingPlayers: players.slice(0, 11),
+    substitutes: players.slice(11, 18),
+    reserves: [],
+  });
+  const saved = saveTeamToLeague(league.id, input);
+
+  assert.throws(() => startLeague(saved.id, 'owner-1', dataset), /2 kullanici takimi gerekli/);
 });
 
 test('local friend league replaces the weakest real teams and creates a full 18-team season', () => {

@@ -78,18 +78,21 @@ const createStartedInviteLeague = (teamCount: number) => {
   return startLeague(league.id, 'owner-1', dataset);
 };
 
-test('Firestore league serializer does not write nested fixture arrays for 2-team seasons', () => {
+test('Firestore league serializer does not write nested fixture arrays for 2-user-team seasons', () => {
   const league = createStartedInviteLeague(2);
   const leagueDoc = toFirestoreLeagueDoc(league, ['owner-1']);
   const fixtureDocs = toFirestoreFixtureDocs(league.fixtures, league.updatedAt);
 
   assert.equal('fixtures' in leagueDoc, false);
+  assert.equal(league.teams.length, 2);
+  assert.equal(league.botTeams.length, 16);
+  assert.equal(league.fixtures.flat().length, 306);
   assert.equal(fixtureDocs.length, league.fixtures.flat().length);
   assert.equal(hasDirectNestedArray(leagueDoc), false);
   assert.equal(hasDirectNestedArray(fixtureDocs), false);
 });
 
-test('Firestore league serializer does not write nested fixture arrays for 18-team seasons', () => {
+test('Firestore league serializer does not write nested fixture arrays for 18-user-team seasons', () => {
   const league = createStartedInviteLeague(18);
   const leagueDoc = toFirestoreLeagueDoc(league, ['owner-1']);
   const fixtureDocs = toFirestoreFixtureDocs(league.fixtures, league.updatedAt);

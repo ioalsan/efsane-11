@@ -577,8 +577,23 @@ export default function MultiplayerLeague({
   const highlights = activeLeague ? getLeagueHighlights(activeLeague) : null;
   const seasonWeekCount = activeLeague?.fixtures.length ?? 0;
   const botSlots = activeLeague
-    ? Math.max(0, activeLeague.maxUsers - (isLocalFriendLeague ? playerSlots.length : activeLeague.teams.length))
+    ? Math.max(0, 18 - (isLocalFriendLeague ? playerSlots.length : activeLeague.teams.length))
     : 0;
+  const inviteUserTeamSlotsRemaining = activeLeague && activeLeague.mode === 'invite'
+    ? Math.max(0, activeLeague.maxUsers - activeLeague.teams.length)
+    : 0;
+  const activeUserTeamTarget = activeLeague
+    ? (isLocalFriendLeague ? playerSlots.length : activeLeague.maxUsers)
+    : 0;
+  const canStartActiveLeague = Boolean(
+    activeLeague
+    && isOwner
+    && (
+      activeLeague.mode === 'local-friends'
+        ? activeLeague.teams.length > 0
+        : activeLeague.teams.length >= activeLeague.maxUsers
+    ),
+  );
   const showLegacyFriendDraft = Boolean(false);
   const humanTeamIds = useMemo(
     () => activeLeague?.teams.map((team) => team.id) ?? [],
@@ -1453,7 +1468,7 @@ export default function MultiplayerLeague({
                 placeholder="Lig adı"
               />
               <label className="grid gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-black/60">
-                Takim sayisi
+                Kullanici takimi sayisi
                 <input
                   type="number"
                   min={2}
@@ -1474,7 +1489,7 @@ export default function MultiplayerLeague({
                     onClick={() => setMaxUsers(option)}
                     className={`game-button border-2 border-black px-3 py-3 text-xs font-black uppercase ${maxUsers === option ? 'bg-black text-white' : 'bg-zinc-100 text-black'}`}
                   >
-                    {option} Takım
+                    {option} Kullanici
                   </button>
                 ))}
               </div>
@@ -1568,7 +1583,7 @@ export default function MultiplayerLeague({
                 >
                   <span className="block truncate">{league.name}</span>
                   <span className="mt-1 block text-[9px] opacity-60">
-                    {league.mode === 'local-friends' ? 'Arkadaş' : 'Davetli'} / {statusLabels[league.status]} / {league.teams.length}+{league.botTeams.length}/{league.maxUsers}
+                    {league.mode === 'local-friends' ? 'Arkadaş' : 'Davetli'} / {statusLabels[league.status]} / {league.teams.length}+{league.botTeams.length}/18
                   </span>
                 </button>
               ))}
@@ -1593,7 +1608,7 @@ export default function MultiplayerLeague({
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-55">Bekleme Odası</p>
                     <h3 className="text-3xl font-black uppercase italic">{activeLeague.name}</h3>
                     <p className="mt-1 text-xs font-black uppercase text-yellow-700">
-                      {statusLabels[activeLeague.status]} / {activeCompetition?.competitionName ?? 'Süper Lig'} / {powerLimitLabels[activeLeague.powerLimit]} / {activeLeague.maxUsers} takım
+                    {statusLabels[activeLeague.status]} / {activeCompetition?.competitionName ?? 'Süper Lig'} / {powerLimitLabels[activeLeague.powerLimit]} / {activeLeague.mode === 'invite' ? `${activeLeague.maxUsers} kullanici takimi` : '18 takim'}
                     </p>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -1612,8 +1627,8 @@ export default function MultiplayerLeague({
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-4">
-                  <MiniStat label="Kullanıcı" value={activeLeague.teams.length} />
-                  <MiniStat label="Bot Slot" value={botSlots} />
+                  <MiniStat label="Kullanıcı" value={`${activeLeague.teams.length}/${activeUserTeamTarget}`} />
+                  <MiniStat label="Gercek Takim" value={botSlots} />
                   <MiniStat label="Hafta" value={seasonWeekCount ? `${Math.min(activeLeague.currentWeek + 1, seasonWeekCount)}/${seasonWeekCount}` : '-'} />
                   <MiniStat label="Lider" value={highlights?.leader?.teamName ?? '-'} />
                 </div>
@@ -1988,7 +2003,7 @@ export default function MultiplayerLeague({
                         <button
                           type="button"
                           onClick={handleStartLeague}
-                          disabled={!isOwner || playerSlots.some((slot) => !slot.ready)}
+                          disabled={!canStartActiveLeague || playerSlots.some((slot) => !slot.ready)}
                           className="game-button mt-5 flex w-full items-center justify-center gap-2 border-4 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black disabled:opacity-35"
                         >
                           <Play size={18} fill="currentColor" /> Ligi Başlat
@@ -2164,6 +2179,11 @@ export default function MultiplayerLeague({
                       {allLeagueTeams.length === 0 && (
                         <p className="border-2 border-dashed border-black/20 p-4 text-xs font-black uppercase opacity-55">Takım bekleniyor</p>
                       )}
+                      {inviteUserTeamSlotsRemaining > 0 && (
+                        <p className="border-2 border-dashed border-yellow-500 bg-yellow-50 p-4 text-xs font-black uppercase text-yellow-800">
+                          Sezonu baslatmak icin {inviteUserTeamSlotsRemaining} kullanici takimi daha gerekli.
+                        </p>
+                      )}
                       {allLeagueTeams.map((team) => (
                         <TeamCard key={team.id} team={team} active={team.ownerId === user?.id} />
                       ))}
@@ -2171,7 +2191,7 @@ export default function MultiplayerLeague({
                     <button
                       type="button"
                       onClick={handleStartLeague}
-                      disabled={!isOwner || activeLeague.teams.length === 0}
+                      disabled={!canStartActiveLeague}
                       className="game-button mt-5 flex w-full items-center justify-center gap-2 border-4 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black disabled:opacity-35"
                     >
                       <Play size={18} fill="currentColor" /> Sezonu Başlat
