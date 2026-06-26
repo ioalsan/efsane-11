@@ -50,6 +50,11 @@ const now = () => new Date().toISOString();
 
 const clean = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+type FirestoreFixtureDoc = CompetitionFixture & {
+  week: number;
+  updatedAt?: string;
+};
+
 const normalizeInviteCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 const clampLeagueTeamCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
@@ -88,6 +93,76 @@ const createStandingRows = (
     };
   });
 };
+
+const withoutFirestoreMeta = (data: Record<string, unknown>) => {
+  const fixture = { ...data };
+  delete fixture.week;
+  delete fixture.updatedAt;
+  delete fixture.fixtures;
+  return fixture as unknown as CompetitionFixture;
+};
+
+const groupFixtureDocsByWeek = (fixtureDocs: FirestoreFixtureDoc[]) => {
+  const grouped = new Map<number, CompetitionFixture[]>();
+  fixtureDocs.forEach((fixtureDoc) => {
+    const { week, updatedAt, ...fixture } = fixtureDoc;
+    void updatedAt;
+    const weekNumber = Number.isFinite(week) && week > 0 ? week : fixture.roundNumber;
+    const round = grouped.get(weekNumber) ?? [];
+    round.push(fixture);
+    grouped.set(weekNumber, round);
+  });
+  return [...grouped.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, fixtures]) => fixtures.sort((a, b) => a.id.localeCompare(b.id)));
+};
+
+const parseFixtureValue = (value: unknown): CompetitionFixture[][] => {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  if (Array.isArray(value[0])) return value as CompetitionFixture[][];
+  const fixtureDocs = (value as Array<CompetitionFixture & { week?: number }>).map((fixture) => ({
+    ...fixture,
+    week: Number(fixture.week ?? fixture.roundNumber),
+  }));
+  return groupFixtureDocsByWeek(fixtureDocs);
+};
+
+export const toFirestoreFixtureDocs = (
+  fixtures: CompetitionFixture[][],
+  updatedAt = now(),
+): FirestoreFixtureDoc[] => fixtures.flatMap((round, roundIndex) => (
+  round.map((fixture) => clean({
+    ...fixture,
+    week: roundIndex + 1,
+    updatedAt,
+  }))
+));
+
+export const toFirestoreLeagueDoc = (
+  league: MultiplayerLeague,
+  memberIds?: string[],
+) => clean({
+  version: league.version,
+  id: league.id,
+  mode: league.mode,
+  name: league.name,
+  ownerId: league.ownerId,
+  inviteCode: league.inviteCode,
+  competitionId: league.competitionId,
+  maxUsers: league.maxUsers,
+  powerLimit: league.powerLimit,
+  playerSlots: league.playerSlots,
+  realTeams: league.realTeams,
+  replacedTeams: league.replacedTeams,
+  status: league.status,
+  currentWeek: league.currentWeek,
+  latestFixtureId: league.latestFixtureId,
+  teamIds: league.teams.map((team) => team.id),
+  botTeamIds: league.botTeams.map((team) => team.id),
+  createdAt: league.createdAt,
+  updatedAt: league.updatedAt,
+  ...(memberIds ? { memberIds } : {}),
+});
 
 const getPlayerMap = (dataset: SeasonDataset) => new Map(
   dataset.players.map((player) => {
@@ -178,10 +253,66 @@ const readTeams = async (db: Firestore, leagueId: string) => {
     .sort((a, b) => Number(a.isBot) - Number(b.isBot) || a.teamName.localeCompare(b.teamName));
 };
 
+const readFixtures = async (db: Firestore, leagueId: string) => {
+  const snapshot = await getDocs(collection(db, 'leagues', leagueId, 'fixtures'));
+  const flatFixtureDocs: FirestoreFixtureDoc[] = [];
+  const legacyRounds: Array<{ week: number; fixtures: CompetitionFixture[] }> = [];
+
+  snapshot.docs.forEach((item) => {
+    const data = item.data();
+    if (Array.isArray(data.fixtures)) {
+      legacyRounds.push({
+        week: Number(data.week ?? data.roundNumber ?? legacyRounds.length + 1),
+        fixtures: data.fixtures as CompetitionFixture[],
+      });
+      return;
+    }
+
+    if (typeof data.homeTeamId === 'string' && typeof data.awayTeamId === 'string') {
+      const fixture = withoutFirestoreMeta(data);
+      flatFixtureDocs.push({
+        ...fixture,
+        week: Number(data.week ?? fixture.roundNumber),
+      });
+    }
+  });
+
+  if (flatFixtureDocs.length > 0) return groupFixtureDocsByWeek(flatFixtureDocs);
+
+  return legacyRounds
+    .sort((a, b) => a.week - b.week)
+    .map((round) => round.fixtures);
+};
+
+const readStandings = async (db: Firestore, leagueId: string) => {
+  const snapshot = await getDocs(collection(db, 'leagues', leagueId, 'standings'));
+  return snapshot.docs
+    .map((item) => item.data() as MultiplayerStandingRow)
+    .sort((a, b) => (
+      b.points - a.points
+      || b.goalDifference - a.goalDifference
+      || b.goalsFor - a.goalsFor
+      || a.teamName.localeCompare(b.teamName)
+    ));
+};
+
+const readMatchReports = async (db: Firestore, leagueId: string) => {
+  const snapshot = await getDocs(collection(db, 'leagues', leagueId, 'matchReports'));
+  return snapshot.docs
+    .map((item) => item.data() as MultiplayerMatchReport)
+    .sort((a, b) => a.week - b.week || a.fixtureId.localeCompare(b.fixtureId));
+};
+
 const hydrateLeague = async (db: Firestore, leagueId: string, data: Record<string, unknown>): Promise<MultiplayerLeague> => {
-  const teams = await readTeams(db, leagueId);
+  const [teams, fixtureRounds, standingRows, matchReports] = await Promise.all([
+    readTeams(db, leagueId),
+    readFixtures(db, leagueId),
+    readStandings(db, leagueId),
+    readMatchReports(db, leagueId),
+  ]);
   const userTeams = teams.filter((team) => !team.isBot);
   const botTeams = teams.filter((team) => team.isBot);
+  const fallbackFixtures = parseFixtureValue(data.fixtures);
   return {
     version: 1,
     id: leagueId,
@@ -197,12 +328,12 @@ const hydrateLeague = async (db: Firestore, leagueId: string, data: Record<strin
     botTeams: botTeams.length > 0 ? botTeams : (Array.isArray(data.botTeams) ? data.botTeams as MultiplayerTeam[] : []),
     realTeams: Array.isArray(data.realTeams) ? data.realTeams as MultiplayerLeague['realTeams'] : [],
     replacedTeams: Array.isArray(data.replacedTeams) ? data.replacedTeams as MultiplayerLeague['replacedTeams'] : [],
-    fixtures: Array.isArray(data.fixtures) ? data.fixtures as CompetitionFixture[][] : [],
-    standings: Array.isArray(data.standings) ? data.standings as MultiplayerStandingRow[] : [],
+    fixtures: fixtureRounds.length > 0 ? fixtureRounds : fallbackFixtures,
+    standings: standingRows.length > 0 ? standingRows : (Array.isArray(data.standings) ? data.standings as MultiplayerStandingRow[] : []),
     status: data.status === 'active' || data.status === 'completed' ? data.status : 'waiting',
     currentWeek: Number(data.currentWeek ?? 0),
     latestFixtureId: typeof data.latestFixtureId === 'string' ? data.latestFixtureId : null,
-    matchReports: Array.isArray(data.matchReports) ? data.matchReports as MultiplayerMatchReport[] : [],
+    matchReports: matchReports.length > 0 ? matchReports : (Array.isArray(data.matchReports) ? data.matchReports as MultiplayerMatchReport[] : []),
     createdAt: String(data.createdAt ?? now()),
     updatedAt: String(data.updatedAt ?? now()),
   };
@@ -214,28 +345,38 @@ const loadOnlineLeague = async (db: Firestore, leagueId: string) => {
   return hydrateLeague(db, snapshot.id, snapshot.data());
 };
 
+const commitBatchedWrites = async (
+  db: Firestore,
+  writes: ((batch: ReturnType<typeof writeBatch>) => void)[],
+) => {
+  const chunkSize = 450;
+  for (let index = 0; index < writes.length; index += chunkSize) {
+    const batch = writeBatch(db);
+    writes.slice(index, index + chunkSize).forEach((write) => write(batch));
+    await batch.commit();
+  }
+};
+
 const persistLeagueSubcollections = async (db: Firestore, league: MultiplayerLeague) => {
-  const batch = writeBatch(db);
+  const fixtureDocs = toFirestoreFixtureDocs(league.fixtures, league.updatedAt);
+  const writes: ((batch: ReturnType<typeof writeBatch>) => void)[] = [];
+
   [...league.teams, ...league.botTeams].forEach((team) => {
-    batch.set(doc(db, 'leagues', league.id, 'teams', team.id), clean(team));
+    writes.push((batch) => batch.set(doc(db, 'leagues', league.id, 'teams', team.id), clean(team)));
   });
-  league.fixtures.forEach((round, index) => {
-    batch.set(doc(db, 'leagues', league.id, 'fixtures', `week-${index + 1}`), clean({
-      week: index + 1,
-      fixtures: round,
-      updatedAt: league.updatedAt,
-    }));
+  fixtureDocs.forEach((fixture) => {
+    writes.push((batch) => batch.set(doc(db, 'leagues', league.id, 'fixtures', fixture.id), clean(fixture)));
   });
   league.standings.forEach((row) => {
-    batch.set(doc(db, 'leagues', league.id, 'standings', row.teamId), clean({
+    writes.push((batch) => batch.set(doc(db, 'leagues', league.id, 'standings', row.teamId), clean({
       ...row,
       updatedAt: league.updatedAt,
-    }));
+    })));
   });
   league.matchReports.forEach((report) => {
-    batch.set(doc(db, 'leagues', league.id, 'matchReports', report.fixtureId), clean(report));
+    writes.push((batch) => batch.set(doc(db, 'leagues', league.id, 'matchReports', report.fixtureId), clean(report)));
   });
-  await batch.commit();
+  await commitBatchedWrites(db, writes);
 };
 
 const saveLeagueDoc = async (db: Firestore, league: MultiplayerLeague, memberIds?: string[]) => {
@@ -243,10 +384,7 @@ const saveLeagueDoc = async (db: Firestore, league: MultiplayerLeague, memberIds
     ...league,
     updatedAt: now(),
   };
-  await setDoc(leagueRef(db, league.id), clean({
-    ...nextLeague,
-    ...(memberIds ? { memberIds } : {}),
-  }), { merge: true });
+  await setDoc(leagueRef(db, league.id), toFirestoreLeagueDoc(nextLeague, memberIds), { merge: true });
   await persistLeagueSubcollections(db, nextLeague);
   return nextLeague;
 };
@@ -291,10 +429,7 @@ export const createLeague = async ({
     updatedAt: createdAt,
   };
 
-  await setDoc(ref, clean({
-    ...league,
-    memberIds: [user.uid],
-  }));
+  await setDoc(ref, toFirestoreLeagueDoc(league, [user.uid]));
   await setDoc(doc(db, 'users', user.uid), clean({
     id: user.uid,
     anonymous: true,
@@ -316,9 +451,8 @@ export const joinLeague = async (inviteCode: string) => {
 
   const target = snapshot.docs[0];
   const data = target.data();
-  const teams = Array.isArray(data.teams) ? data.teams as MultiplayerTeam[] : [];
-  const maxUsers = Number(data.maxUsers ?? 8) as MultiplayerMaxUsers;
-  if (teams.length >= maxUsers && !teams.some((team) => team.ownerId === user.uid)) {
+  const league = await hydrateLeague(db, target.id, data);
+  if (league.teams.length >= league.maxUsers && !league.teams.some((team) => team.ownerId === user.uid)) {
     throw new Error('Lig dolu.');
   }
 
@@ -339,6 +473,8 @@ export const saveTeamToLeague = async (
 
   const cap = getPowerLimitCap(league.powerLimit);
   if (cap && input.rating > cap) throw new Error(`Takim ortalamasi ${cap} limitini asiyor.`);
+  const otherUserTeams = league.teams.filter((team) => team.ownerId !== user.uid);
+  if (otherUserTeams.length >= league.maxUsers) throw new Error('Lig dolu.');
   if (input.startingXI.length !== 11) throw new Error('Ilk 11 tamamlanmadi.');
   if (input.substitutes.length !== 7) throw new Error('7 yedek secilmeli.');
   if (!input.captainId || !input.startingXI.includes(input.captainId)) {
@@ -374,7 +510,7 @@ export const saveTeamToLeague = async (
     standings: createStandingRows(nextTeams.map((item) => item.id), nextTeams, league.fixtures),
     updatedAt: now(),
   };
-  await setDoc(leagueRef(db, league.id), clean(nextLeague), { merge: true });
+  await setDoc(leagueRef(db, league.id), toFirestoreLeagueDoc(nextLeague), { merge: true });
   await updateDoc(leagueRef(db, league.id), {
     memberIds: arrayUnion(user.uid),
     updatedAt: nextLeague.updatedAt,

@@ -69,6 +69,7 @@ import {
   type LocalAuthUser,
 } from '@/lib/authService';
 import { FORMATIONS, type FormationType, type PositionConfig } from '@/lib/formations';
+import { getDraftSeenTeamCount, pickNextDraftSquad } from '@/lib/draftTeamRotation';
 import type { ManagerMentality } from '@/lib/teamManagement';
 import type { CompetitionFixture } from '@/lib/competitionEngine';
 import type { Player, SeasonTeam, Squad } from '@/types';
@@ -119,6 +120,7 @@ interface SlotDraft {
   substitutes: string[];
   reserves: string[];
   rolledSquadId: string | null;
+  rolledTeamIds: string[];
   pickAvailable: boolean;
   autoRoll: boolean;
 }
@@ -132,6 +134,7 @@ interface InviteDraft {
   substitutes: string[];
   reserves: string[];
   rolledSquadId: string | null;
+  rolledTeamIds: string[];
   pickAvailable: boolean;
   autoRoll: boolean;
 }
@@ -175,6 +178,7 @@ const createEmptyInviteDraft = (): InviteDraft => ({
   substitutes: [],
   reserves: [],
   rolledSquadId: null,
+  rolledTeamIds: [],
   pickAvailable: false,
   autoRoll: false,
 });
@@ -287,6 +291,7 @@ const createDraftFromSlot = (slot: PlayerSlot): SlotDraft => ({
   substitutes: slot.selectedSquad?.substitutes ?? [],
   reserves: [],
   rolledSquadId: null,
+  rolledTeamIds: [],
   pickAvailable: false,
   autoRoll: false,
 });
@@ -609,6 +614,9 @@ export default function MultiplayerLeague({
     () => getCompetitionSquads(activeCompetitionId, dataset).filter((squad) => squad.players.length > 0),
     [activeCompetitionId, dataset],
   );
+  const activeDraftSeenTeamCount = activeDraft
+    ? getDraftSeenTeamCount(draftSquads, activeDraft.rolledTeamIds)
+    : 0;
   const activeRolledSquad = useMemo(
     () => draftSquads.find((squad) => squad.id === activeDraft?.rolledSquadId) ?? null,
     [activeDraft?.rolledSquadId, draftSquads],
@@ -674,6 +682,7 @@ export default function MultiplayerLeague({
     () => new Set(draftPlayerIds(inviteDraft)),
     [inviteDraft],
   );
+  const inviteDraftSeenTeamCount = getDraftSeenTeamCount(draftSquads, inviteDraft.rolledTeamIds);
   const inviteRolledSquad = useMemo(
     () => draftSquads.find((squad) => squad.id === inviteDraft.rolledSquadId) ?? null,
     [draftSquads, inviteDraft.rolledSquadId],
@@ -721,6 +730,7 @@ export default function MultiplayerLeague({
     substitutes: inviteDraft.substitutes,
     reserves: [],
     rolledSquadId: inviteDraft.rolledSquadId,
+    rolledTeamIds: inviteDraft.rolledTeamIds,
     pickAvailable: inviteDraft.pickAvailable,
     autoRoll: inviteDraft.autoRoll,
   }), [inviteDraft, managerName]);
@@ -737,6 +747,7 @@ export default function MultiplayerLeague({
       substitutes: hasQuickStartingXI ? substitutePlayers.map((player) => player.id) : [],
       reserves: [],
       rolledSquadId: null,
+      rolledTeamIds: [],
       pickAvailable: false,
       autoRoll: false,
     };
@@ -753,6 +764,7 @@ export default function MultiplayerLeague({
       substitutes: ownedTeam.substitutes,
       reserves: [],
       rolledSquadId: null,
+      rolledTeamIds: [],
       pickAvailable: false,
       autoRoll: false,
     };
@@ -885,27 +897,19 @@ export default function MultiplayerLeague({
     }));
   };
 
-  const getRandomDraftSquad = (excludedSquadId: string | null = null) => {
-    if (draftSquads.length === 0) return null;
-    const availableSquads = draftSquads.length > 1
-      ? draftSquads.filter((squad) => squad.id !== excludedSquadId)
-      : draftSquads;
-    return availableSquads[Math.floor(Math.random() * availableSquads.length)] ?? null;
-  };
-
   const getPickCompletionPatch = (nextTotal: number): Partial<SlotDraft> => {
     if (!activeDraft?.autoRoll || nextTotal >= draftTargetTotal) return { pickAvailable: false };
-    const nextSquad = getRandomDraftSquad(activeDraft.rolledSquadId);
-    return nextSquad
-      ? { rolledSquadId: nextSquad.id, pickAvailable: true }
+    const pick = pickNextDraftSquad(draftSquads, activeDraft.rolledTeamIds, activeDraft.rolledSquadId);
+    return pick.squad
+      ? { rolledSquadId: pick.squad.id, rolledTeamIds: pick.usedTeamIds, pickAvailable: true }
       : { pickAvailable: false };
   };
 
   const getInvitePickCompletionPatch = (nextTotal: number): Partial<InviteDraft> => {
     if (!inviteDraft.autoRoll || nextTotal >= draftTargetTotal) return { pickAvailable: false };
-    const nextSquad = getRandomDraftSquad(inviteDraft.rolledSquadId);
-    return nextSquad
-      ? { rolledSquadId: nextSquad.id, pickAvailable: true }
+    const pick = pickNextDraftSquad(draftSquads, inviteDraft.rolledTeamIds, inviteDraft.rolledSquadId);
+    return pick.squad
+      ? { rolledSquadId: pick.squad.id, rolledTeamIds: pick.usedTeamIds, pickAvailable: true }
       : { pickAvailable: false };
   };
 
@@ -919,10 +923,11 @@ export default function MultiplayerLeague({
     if (activeDraft.pickAvailable) return;
     if (draftSquads.length === 0) return;
 
-    const randomSquad = getRandomDraftSquad(activeDraft.rolledSquadId);
-    if (!randomSquad) return;
+    const pick = pickNextDraftSquad(draftSquads, activeDraft.rolledTeamIds, activeDraft.rolledSquadId);
+    if (!pick.squad) return;
     updateActiveDraft({
-      rolledSquadId: randomSquad.id,
+      rolledSquadId: pick.squad.id,
+      rolledTeamIds: pick.usedTeamIds,
       pickAvailable: true,
     });
     setPendingPlacementPlayerId(null);
@@ -938,10 +943,11 @@ export default function MultiplayerLeague({
     if (inviteDraft.pickAvailable) return;
     if (draftSquads.length === 0) return;
 
-    const randomSquad = getRandomDraftSquad(inviteDraft.rolledSquadId);
-    if (!randomSquad) return;
+    const pick = pickNextDraftSquad(draftSquads, inviteDraft.rolledTeamIds, inviteDraft.rolledSquadId);
+    if (!pick.squad) return;
     updateInviteDraft({
-      rolledSquadId: randomSquad.id,
+      rolledSquadId: pick.squad.id,
+      rolledTeamIds: pick.usedTeamIds,
       pickAvailable: true,
     });
     setInvitePlacement(null);
@@ -1078,6 +1084,7 @@ export default function MultiplayerLeague({
       reserves: [],
       pickAvailable: false,
       rolledSquadId: null,
+      rolledTeamIds: [],
     });
     setPendingPlacementPlayerId(null);
     setPendingPlacementSource(null);
@@ -1731,6 +1738,8 @@ export default function MultiplayerLeague({
                       selectedIds={activeDraftSelectedIds}
                       pendingPlayerId={pendingPlacementPlayer?.id ?? null}
                       activeTotal={activeDraftTotal}
+                      seenTeamCount={activeDraftSeenTeamCount}
+                      teamPoolCount={draftSquads.length}
                       teamById={teamById}
                       onRoll={rollActiveSquad}
                       onSelect={selectDraftPlayer}
@@ -2092,6 +2101,8 @@ export default function MultiplayerLeague({
                         selectedIds={inviteDraftSelectedIds}
                         pendingPlayerId={invitePlacementPlayer?.id ?? null}
                         activeTotal={inviteDraftTotal}
+                        seenTeamCount={inviteDraftSeenTeamCount}
+                        teamPoolCount={draftSquads.length}
                         teamById={teamById}
                         onRoll={rollInviteSquad}
                         onSelect={(playerId) => selectInvitePlayerForPlacement(playerId, 'draft')}
@@ -2439,6 +2450,8 @@ function DraftRollPanel({
   selectedIds,
   pendingPlayerId,
   activeTotal,
+  seenTeamCount,
+  teamPoolCount,
   teamById,
   onRoll,
   onSelect,
@@ -2451,6 +2464,8 @@ function DraftRollPanel({
   selectedIds: Set<string>;
   pendingPlayerId: string | null;
   activeTotal: number;
+  seenTeamCount: number;
+  teamPoolCount: number;
   teamById: Map<string, SeasonTeam>;
   onRoll: () => void;
   onSelect: (playerId: string) => void;
@@ -2477,6 +2492,12 @@ function DraftRollPanel({
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
             <span className="text-lg tracking-[0.12em] text-yellow-300">{'\u2605'.repeat(stars)}<span className="text-white/20">{'\u2605'.repeat(5 - stars)}</span></span>
             <span className="text-[10px] font-black uppercase text-white/55">Bu takimdan 1 oyuncu sec</span>
+          </div>
+        )}
+        {teamPoolCount > 0 && (
+          <div className="mt-3 border border-white/10 bg-white/5 p-2 text-[10px] font-black uppercase text-white/55">
+            Bu draftta gorulen takim: {seenTeamCount}/{teamPoolCount}
+            <span className="mt-1 block text-white/35">Tum takimlar gorulmeden tekrar oncelik almaz.</span>
           </div>
         )}
         <button
