@@ -180,11 +180,64 @@ const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).sli
 const normalizeInviteCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 const clampLeagueTeamCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
-const INVITE_LEAGUE_TOTAL_TEAMS = 18;
+export const INVITE_LEAGUE_TOTAL_TEAMS = 18;
 
 const isValidMaxUsers = (value: number): value is MultiplayerMaxUsers => (
   Number.isInteger(value) && value >= 2 && value <= 18
 );
+
+export interface InviteLeagueStartReadiness {
+  isOwner: boolean;
+  leagueStatus: MultiplayerLeagueStatus;
+  selectedUserTeamCount: number;
+  userTeamsCount: number;
+  totalTeamsCount: number;
+  expectedTotalTeams: number;
+  ready: boolean;
+  missingReason: string | null;
+}
+
+export const getInviteUserTeams = (league: MultiplayerLeague) => (
+  league.teams.filter((team) => !team.isBot)
+);
+
+export const getInviteLeagueStartReadiness = (
+  league: MultiplayerLeague,
+  userId: string | null | undefined,
+): InviteLeagueStartReadiness => {
+  const userTeamsCount = getInviteUserTeams(league).length;
+  const selectedUserTeamCount = league.maxUsers;
+  const materializedTotalTeams = userTeamsCount + league.botTeams.filter((team) => team.isBot).length;
+  const canFillToExpected = userTeamsCount >= selectedUserTeamCount && userTeamsCount <= INVITE_LEAGUE_TOTAL_TEAMS;
+  const totalTeamsCount = Math.max(
+    materializedTotalTeams,
+    canFillToExpected ? INVITE_LEAGUE_TOTAL_TEAMS : userTeamsCount,
+  );
+  const isOwner = Boolean(userId && league.ownerId === userId);
+  let missingReason: string | null = null;
+
+  if (!isOwner) missingReason = 'Sadece lig sahibi sezonu baslatabilir.';
+  else if (league.status !== 'waiting') missingReason = 'Sezon zaten baslatildi.';
+  else if (userTeamsCount === 0) missingReason = 'En az bir kullanici takimi gerekli.';
+  else if (userTeamsCount < selectedUserTeamCount) {
+    missingReason = `${selectedUserTeamCount}/${selectedUserTeamCount} kullanici takimi icin ${selectedUserTeamCount - userTeamsCount} takim eksik.`;
+  } else if (userTeamsCount > INVITE_LEAGUE_TOTAL_TEAMS) {
+    missingReason = '18 takimdan fazla kullanici takimi olamaz.';
+  } else if (totalTeamsCount !== INVITE_LEAGUE_TOTAL_TEAMS) {
+    missingReason = `Lig ${totalTeamsCount}/${INVITE_LEAGUE_TOTAL_TEAMS} takima tamamlandi.`;
+  }
+
+  return {
+    isOwner,
+    leagueStatus: league.status,
+    selectedUserTeamCount,
+    userTeamsCount,
+    totalTeamsCount,
+    expectedTotalTeams: INVITE_LEAGUE_TOTAL_TEAMS,
+    ready: missingReason === null,
+    missingReason,
+  };
+};
 
 const clampFriendCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
 
@@ -762,22 +815,24 @@ export const startLeague = (
   if (!league) throw new Error('Lig bulunamadi.');
   if (league.ownerId !== ownerId) throw new Error('Sezonu sadece lig sahibi baslatabilir.');
   if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
-  if (league.teams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
-  if (league.teams.length < league.maxUsers) {
+  const userTeams = getInviteUserTeams(league);
+  if (userTeams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
+  if (userTeams.length < league.maxUsers) {
     throw new Error(`Sezonu baslatmak icin ${league.maxUsers} kullanici takimi gerekli.`);
   }
-  if (league.teams.length > INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimdan fazla kullanici takimi olamaz.');
+  if (userTeams.length > INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimdan fazla kullanici takimi olamaz.');
 
-  const neededRealTeams = Math.max(0, INVITE_LEAGUE_TOTAL_TEAMS - league.teams.length);
-  const plan = getRealTeamReplacementPlan(league.teams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
+  const neededRealTeams = Math.max(0, INVITE_LEAGUE_TOTAL_TEAMS - userTeams.length);
+  const plan = getRealTeamReplacementPlan(userTeams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
   const botTeams = createRealLeagueTeams(plan.realTeams.slice(0, neededRealTeams), dataset, league.id);
-  const allTeams = [...league.teams, ...botTeams].slice(0, INVITE_LEAGUE_TOTAL_TEAMS);
+  const allTeams = [...userTeams, ...botTeams].slice(0, INVITE_LEAGUE_TOTAL_TEAMS);
   if (allTeams.length !== INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimlik lig havuzu olusturulamadi.');
   const teamIds = allTeams.map((team) => team.id);
   const fixtures = generateRoundRobin(teamIds, true);
 
   return saveLeague({
     ...league,
+    teams: userTeams,
     botTeams,
     realTeams: plan.realTeams.slice(0, neededRealTeams),
     replacedTeams: plan.replacedTeams,

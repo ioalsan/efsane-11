@@ -34,6 +34,8 @@ import { ensureAnonymousUser, getFirebaseClient, isFirebaseConfigured } from './
 import {
   getRealTeamReplacementPlan,
   getPowerLimitCap,
+  getInviteUserTeams,
+  INVITE_LEAGUE_TOTAL_TEAMS,
   type MultiplayerLeague,
   type MultiplayerMatchReport,
   type MultiplayerMaxUsers,
@@ -61,8 +63,6 @@ type FirestoreFixtureDoc = CompetitionFixture & {
 const normalizeInviteCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 const clampLeagueTeamCount = (value: number) => Math.min(18, Math.max(2, Math.round(value)));
-const INVITE_LEAGUE_TOTAL_TEAMS = 18;
-
 const finalScore = (fixture: CompetitionFixture) => fixture.result?.extraTime ?? fixture.result?.normalTime ?? null;
 
 const getForm = (teamId: string, fixtures: CompetitionFixture[]) => {
@@ -543,21 +543,23 @@ export const startLeague = async (
   const league = await loadOnlineLeague(db, leagueId);
   if (league.ownerId !== user.uid) throw new Error('Sezonu sadece lig sahibi baslatabilir.');
   if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
-  if (league.teams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
-  if (league.teams.length < league.maxUsers) {
+  const userTeams = getInviteUserTeams(league);
+  if (userTeams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
+  if (userTeams.length < league.maxUsers) {
     throw new Error(`Sezonu baslatmak icin ${league.maxUsers} kullanici takimi gerekli.`);
   }
-  if (league.teams.length > INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimdan fazla kullanici takimi olamaz.');
+  if (userTeams.length > INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimdan fazla kullanici takimi olamaz.');
 
-  const neededRealTeams = Math.max(0, INVITE_LEAGUE_TOTAL_TEAMS - league.teams.length);
-  const plan = getRealTeamReplacementPlan(league.teams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
+  const neededRealTeams = Math.max(0, INVITE_LEAGUE_TOTAL_TEAMS - userTeams.length);
+  const plan = getRealTeamReplacementPlan(userTeams.length, dataset, league.competitionId ?? DEFAULT_COMPETITION_ID);
   const botTeams = createRealLeagueTeams(plan.realTeams.slice(0, neededRealTeams), dataset, league.id);
-  const allTeams = [...league.teams, ...botTeams].slice(0, INVITE_LEAGUE_TOTAL_TEAMS);
+  const allTeams = [...userTeams, ...botTeams].slice(0, INVITE_LEAGUE_TOTAL_TEAMS);
   if (allTeams.length !== INVITE_LEAGUE_TOTAL_TEAMS) throw new Error('18 takimlik lig havuzu olusturulamadi.');
   const teamIds = allTeams.map((team) => team.id);
   const fixtures = generateRoundRobin(teamIds, true);
   const nextLeague: MultiplayerLeague = {
     ...league,
+    teams: userTeams,
     botTeams,
     realTeams: plan.realTeams.slice(0, neededRealTeams),
     replacedTeams: plan.replacedTeams,
@@ -570,9 +572,9 @@ export const startLeague = async (
     weekProgress: [],
   };
 
-  const saved = await saveLeagueDoc(db, nextLeague, [user.uid, ...league.teams.map((team) => team.ownerId)]);
+  const saved = await saveLeagueDoc(db, nextLeague, [user.uid, ...userTeams.map((team) => team.ownerId)]);
   await updateDoc(leagueRef(db, league.id), {
-    memberIds: arrayUnion(...league.teams.map((team) => team.ownerId), user.uid),
+    memberIds: arrayUnion(...userTeams.map((team) => team.ownerId), user.uid),
   });
   return saved;
 };

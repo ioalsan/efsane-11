@@ -24,6 +24,7 @@ import {
   createLocalFriendLeague,
   getLeagueHighlights,
   getCurrentWeekProgress,
+  getInviteLeagueStartReadiness,
   getPowerLimitCap,
   getRealTeamReplacementPlan,
   getTeamDisplayName,
@@ -692,23 +693,25 @@ export default function MultiplayerLeague({
     : null;
   const highlights = activeLeague ? getLeagueHighlights(activeLeague) : null;
   const seasonWeekCount = activeLeague?.fixtures.length ?? 0;
+  const inviteStartReadiness = activeLeague?.mode === 'invite'
+    ? getInviteLeagueStartReadiness(activeLeague, user?.id)
+    : null;
+  const activeUserTeamsCount = inviteStartReadiness?.userTeamsCount ?? activeLeague?.teams.length ?? 0;
   const botSlots = activeLeague
-    ? Math.max(0, 18 - (isLocalFriendLeague ? playerSlots.length : activeLeague.teams.length))
+    ? Math.max(0, 18 - (isLocalFriendLeague ? playerSlots.length : activeUserTeamsCount))
     : 0;
   const inviteUserTeamSlotsRemaining = activeLeague && activeLeague.mode === 'invite'
-    ? Math.max(0, activeLeague.maxUsers - activeLeague.teams.length)
+    ? Math.max(0, activeLeague.maxUsers - (inviteStartReadiness?.userTeamsCount ?? activeLeague.teams.length))
     : 0;
   const activeUserTeamTarget = activeLeague
     ? (isLocalFriendLeague ? playerSlots.length : activeLeague.maxUsers)
     : 0;
   const canStartActiveLeague = Boolean(
     activeLeague
-    && isOwner
-    && (
-      activeLeague.mode === 'local-friends'
-        ? activeLeague.teams.length > 0
-        : activeLeague.teams.length >= activeLeague.maxUsers
-    ),
+    && activeLeague.status === 'waiting'
+    && (activeLeague.mode === 'local-friends'
+      ? isOwner && activeLeague.teams.length > 0
+      : inviteStartReadiness?.ready),
   );
   const showLegacyFriendDraft = Boolean(false);
   const humanTeamIds = useMemo(
@@ -1473,6 +1476,10 @@ export default function MultiplayerLeague({
 
   const handleStartLeague = async () => {
     if (!activeLeague || !user) return;
+    if (!canStartActiveLeague) {
+      setResultNotice('error', inviteStartReadiness?.missingReason ?? 'Sezonu baslatma kosullari tamamlanmadi.');
+      return;
+    }
     try {
       if (isOnlineInviteLeague) {
         const league = await startOnlineLeague(activeLeague.id, dataset);
@@ -1512,7 +1519,9 @@ export default function MultiplayerLeague({
         : `${result.league.currentWeek}. hafta tamamlandi.`);
       if (generatedOnly) await openOwnGeneratedMatch(result.league);
     } catch (error) {
-      setResultNotice('error', getErrorMessage(error));
+      const message = getErrorMessage(error);
+      console.error('Sezon baslatilamadi', error);
+      setResultNotice('error', message);
     }
   };
 
@@ -1872,7 +1881,7 @@ export default function MultiplayerLeague({
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-4">
-                  <MiniStat label="Kullanıcı" value={`${activeLeague.teams.length}/${activeUserTeamTarget}`} />
+                  <MiniStat label="Kullanıcı" value={`${inviteStartReadiness?.userTeamsCount ?? activeLeague.teams.length}/${activeUserTeamTarget}`} />
                   <MiniStat label="Gercek Takim" value={botSlots} />
                   <MiniStat label="Hafta" value={seasonWeekCount ? `${Math.min(activeLeague.currentWeek + 1, seasonWeekCount)}/${seasonWeekCount}` : '-'} />
                   <MiniStat label="Lider" value={highlights?.leader?.teamName ?? '-'} />
@@ -2454,6 +2463,22 @@ export default function MultiplayerLeague({
                         <TeamCard key={team.id} team={team} active={team.ownerId === user?.id} />
                       ))}
                     </div>
+                    {inviteStartReadiness && (
+                      <div className={`mt-4 border-2 p-3 text-[10px] font-black uppercase ${
+                        inviteStartReadiness.ready
+                          ? 'border-green-600 bg-green-50 text-green-800'
+                          : 'border-yellow-500 bg-yellow-50 text-yellow-800'
+                      }`}
+                      >
+                        <p>{inviteStartReadiness.missingReason ?? 'Sezon baslatmaya hazir.'}</p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          <span>Owner: {inviteStartReadiness.isOwner ? 'Evet' : 'Hayir'}</span>
+                          <span>Status: {inviteStartReadiness.leagueStatus}</span>
+                          <span>Kullanici: {inviteStartReadiness.userTeamsCount}/{inviteStartReadiness.selectedUserTeamCount}</span>
+                          <span>Lig: {inviteStartReadiness.totalTeamsCount}/{inviteStartReadiness.expectedTotalTeams}</span>
+                        </div>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={handleStartLeague}

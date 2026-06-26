@@ -5,6 +5,7 @@ import {
   consumeMultiplayerMigrationNotice,
   createLeague,
   createLocalFriendLeague,
+  getInviteLeagueStartReadiness,
   getRealTeamReplacementPlan,
   listLeagues,
   savePlayerSlotToLeague,
@@ -182,6 +183,103 @@ test('invite league waits for the selected user team count before starting', () 
   const saved = saveTeamToLeague(league.id, input);
 
   assert.throws(() => startLeague(saved.id, 'owner-1', dataset), /2 kullanici takimi gerekli/);
+});
+
+test('invite league start readiness uses user teams separately from real teams', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .filter((team) => getTeamPlayers(team.id, dataset).length >= 18)
+    .slice(0, 2);
+  assert.equal(sourceTeams.length, 2);
+
+  let league = createLeague({
+    name: 'Start Debug Ligi',
+    ownerId: 'owner-1',
+    maxUsers: 2,
+    powerLimit: 'free',
+  });
+
+  const missingReadiness = getInviteLeagueStartReadiness(league, 'owner-1');
+  assert.equal(missingReadiness.ready, false);
+  assert.equal(missingReadiness.userTeamsCount, 0);
+
+  sourceTeams.forEach((sourceTeam, index) => {
+    const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+    league = saveTeamToLeague(league.id, buildMultiplayerTeamInput({
+      ownerId: `user-${index + 1}`,
+      teamName: `Ready ${index + 1}`,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0].id,
+      startingPlayers: players.slice(0, 11),
+      substitutes: players.slice(11, 18),
+      reserves: [],
+    }));
+  });
+
+  const ownerReadiness = getInviteLeagueStartReadiness(league, 'owner-1');
+  assert.equal(ownerReadiness.ready, true);
+  assert.equal(ownerReadiness.userTeamsCount, 2);
+  assert.equal(ownerReadiness.totalTeamsCount, 18);
+
+  const nonOwnerReadiness = getInviteLeagueStartReadiness(league, 'user-1');
+  assert.equal(nonOwnerReadiness.ready, false);
+  assert.match(nonOwnerReadiness.missingReason ?? '', /lig sahibi/);
+});
+
+test('invite league can start from a waiting state that already has real teams hydrated', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const storageKey = 'canli11:multiplayer-leagues:v1';
+  const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .filter((team) => getTeamPlayers(team.id, dataset).length >= 18)
+    .slice(0, 2);
+  assert.equal(sourceTeams.length, 2);
+
+  let league = createLeague({
+    name: 'Stale Bot Start',
+    ownerId: 'owner-1',
+    maxUsers: 2,
+    powerLimit: 'free',
+  });
+
+  sourceTeams.forEach((sourceTeam, index) => {
+    const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+    league = saveTeamToLeague(league.id, buildMultiplayerTeamInput({
+      ownerId: `user-${index + 1}`,
+      teamName: `Stale ${index + 1}`,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0].id,
+      startingPlayers: players.slice(0, 11),
+      substitutes: players.slice(11, 18),
+      reserves: [],
+    }));
+  });
+
+  const started = startLeague(league.id, 'owner-1', dataset);
+  const staleWaitingLeague = {
+    ...started,
+    status: 'waiting' as const,
+    fixtures: [],
+    standings: [],
+    matchReports: [],
+    weekProgress: [],
+  };
+  window.localStorage.setItem(storageKey, JSON.stringify([staleWaitingLeague]));
+
+  const restored = listLeagues()[0];
+  const readiness = getInviteLeagueStartReadiness(restored, 'owner-1');
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.userTeamsCount, 2);
+  assert.equal(readiness.totalTeamsCount, 18);
+
+  const restarted = startLeague(restored.id, 'owner-1', dataset);
+  assert.equal(restarted.teams.length, 2);
+  assert.equal(restarted.botTeams.length, 16);
+  assert.equal(restarted.fixtures.length, 34);
+  assert.equal(restarted.fixtures.flat().length, 306);
 });
 
 test('invite league waits for every user match progress before advancing the week', () => {
