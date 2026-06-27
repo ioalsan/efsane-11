@@ -23,7 +23,7 @@ import {
 } from './teamManagement';
 import type { Player, SeasonDataset, SeasonTeam } from '@/types';
 
-export type MultiplayerLeagueStatus = 'waiting' | 'active' | 'completed';
+export type MultiplayerLeagueStatus = 'waiting' | 'active' | 'completed' | 'deleted';
 export type MultiplayerMaxUsers = number;
 export type MultiplayerPowerLimit = 'free' | 'balanced' | 'max80' | 'max85';
 export type MultiplayerLeagueMode = 'invite' | 'local-friends';
@@ -126,6 +126,14 @@ export interface MultiplayerLeague {
   latestFixtureId: string | null;
   matchReports: MultiplayerMatchReport[];
   weekProgress: WeekUserProgress[];
+  startedAt?: string | null;
+  startVersion?: number | null;
+  advancingWeek?: number | null;
+  advancingBy?: string | null;
+  advanceStartedAt?: string | null;
+  advanceVersion?: number | null;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -188,7 +196,7 @@ const isValidMaxUsers = (value: number): value is MultiplayerMaxUsers => (
 
 export interface InviteLeagueStartReadiness {
   isOwner: boolean;
-  leagueStatus: MultiplayerLeagueStatus;
+  leagueStatus: MultiplayerLeagueStatus | string;
   selectedUserTeamCount: number;
   userTeamsCount: number;
   totalTeamsCount: number;
@@ -196,6 +204,15 @@ export interface InviteLeagueStartReadiness {
   ready: boolean;
   missingReason: string | null;
 }
+
+export const STARTABLE_STATUSES = ['waiting', 'lobby', 'ready'] as const;
+
+export const isStartableStatus = (status: string) => STARTABLE_STATUSES.includes(status as typeof STARTABLE_STATUSES[number]);
+
+const normalizeLeagueStatus = (status: unknown): MultiplayerLeagueStatus => {
+  if (status === 'active' || status === 'completed' || status === 'deleted') return status;
+  return 'waiting';
+};
 
 export const getInviteUserTeams = (league: MultiplayerLeague) => (
   league.teams.filter((team) => !team.isBot)
@@ -217,7 +234,7 @@ export const getInviteLeagueStartReadiness = (
   let missingReason: string | null = null;
 
   if (!isOwner) missingReason = 'Sadece lig sahibi sezonu baslatabilir.';
-  else if (league.status !== 'waiting') missingReason = 'Sezon zaten baslatildi.';
+  else if (!isStartableStatus(league.status)) missingReason = 'Sezon zaten baslatildi.';
   else if (userTeamsCount === 0) missingReason = 'En az bir kullanici takimi gerekli.';
   else if (userTeamsCount < selectedUserTeamCount) {
     missingReason = `${selectedUserTeamCount}/${selectedUserTeamCount} kullanici takimi icin ${selectedUserTeamCount - userTeamsCount} takim eksik.`;
@@ -327,6 +344,7 @@ const readLeagues = (): MultiplayerLeague[] => {
     if (!Array.isArray(parsed)) return [];
     const leagues = parsed.filter(isMultiplayerLeague).map((league) => ({
       ...league,
+      status: normalizeLeagueStatus(league.status),
       weekProgress: Array.isArray(league.weekProgress) ? league.weekProgress : [],
     }));
     const cleanedLeagues = leagues.map(cleanCorruptWaitingLeague);
@@ -377,7 +395,7 @@ const isMultiplayerLeague = (value: unknown): value is MultiplayerLeague => {
     Array.isArray(league.fixtures) &&
     Array.isArray(league.standings) &&
     Array.isArray(league.matchReports) &&
-    (league.status === 'waiting' || league.status === 'active' || league.status === 'completed')
+    (isStartableStatus(String(league.status)) || league.status === 'active' || league.status === 'completed' || league.status === 'deleted')
   );
 };
 
@@ -439,6 +457,11 @@ const getRealTeamRating = (team: SeasonTeam, players: ReturnType<typeof getTeamP
   if (players.length === 0) return 72 + team.strengthBonus;
   const average = players.reduce((total, player) => total + player.rating + player.form * 0.3, 0) / players.length;
   return Math.max(55, Math.min(96, Math.round(average + team.strengthBonus)));
+};
+
+export const getRealTeamChemistry = (rating: number, teamId: string) => {
+  const variation = [...teamId].reduce((total, character) => total + character.charCodeAt(0), 0) % 5;
+  return Math.max(68, Math.min(88, Math.round(69 + (rating - 66) * 0.55 + variation)));
 };
 
 const realTeamSummary = (
@@ -510,7 +533,7 @@ const createRealLeagueTeams = (
       substitutes: players.slice(11, 18).map((player) => player.id),
       reserves: players.slice(18, 23).map((player) => player.id),
       rating: realTeam.rating,
-      chemistry: 72,
+      chemistry: getRealTeamChemistry(realTeam.rating, realTeam.sourceTeamId),
       isBot: true,
       sourceTeamId: realTeam.sourceTeamId,
       createdAt,
@@ -558,15 +581,15 @@ const getCompetitionTeamMap = (
   );
 };
 
-export const listLeagues = () => readLeagues();
+export const listLeagues = () => readLeagues().filter((league) => league.status !== 'deleted' && !league.deletedAt);
 
 export const loadLeague = (leagueId: string) => (
-  readLeagues().find((league) => league.id === leagueId) ?? null
+  readLeagues().find((league) => league.id === leagueId && league.status !== 'deleted' && !league.deletedAt) ?? null
 );
 
 export const findLeagueByInviteCode = (inviteCode: string) => {
   const code = normalizeInviteCode(inviteCode);
-  return readLeagues().find((league) => league.inviteCode === code) ?? null;
+  return readLeagues().find((league) => league.inviteCode === code && league.status !== 'deleted' && !league.deletedAt) ?? null;
 };
 
 export const createLeague = ({
@@ -814,7 +837,7 @@ export const startLeague = (
   const league = loadLeague(leagueId);
   if (!league) throw new Error('Lig bulunamadi.');
   if (league.ownerId !== ownerId) throw new Error('Sezonu sadece lig sahibi baslatabilir.');
-  if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
+  if (!isStartableStatus(league.status)) throw new Error('Lig zaten baslatildi.');
   const userTeams = getInviteUserTeams(league);
   if (userTeams.length === 0) throw new Error('En az bir kullanici takimi gerekli.');
   if (userTeams.length < league.maxUsers) {
@@ -843,6 +866,8 @@ export const startLeague = (
     latestFixtureId: null,
     matchReports: [],
     weekProgress: [],
+    startedAt: now(),
+    startVersion: Date.now(),
   });
 };
 
@@ -855,7 +880,7 @@ export const startLocalFriendLeague = (
   if (!league) throw new Error('Lig bulunamadi.');
   if ((league.mode ?? 'invite') !== 'local-friends') throw new Error('Bu lig arkadas ligi degil.');
   if (league.ownerId !== ownerId) throw new Error('Sezonu sadece lig sahibi baslatabilir.');
-  if (league.status !== 'waiting') throw new Error('Lig zaten baslatildi.');
+  if (!isStartableStatus(league.status)) throw new Error('Lig zaten baslatildi.');
 
   const playerSlots = league.playerSlots ?? [];
   const readySlots = playerSlots.filter((slot) => slot.ready);
@@ -891,6 +916,8 @@ export const startLocalFriendLeague = (
     latestFixtureId: null,
     matchReports: [],
     weekProgress: [],
+    startedAt: now(),
+    startVersion: Date.now(),
   });
 };
 
@@ -902,17 +929,19 @@ export const getCurrentWeekProgress = (league: MultiplayerLeague) => (
   (league.weekProgress ?? []).filter((progress) => progress.week === league.currentWeek + 1)
 );
 
-export const isCurrentWeekReadyToAdvance = (league: MultiplayerLeague) => {
-  const progress = getCurrentWeekProgress(league);
-  return progress.length > 0 && progress.every(isWeekProgressDone);
-};
-
-const createWeekProgressEntries = (
+export const createWeekProgressEntries = (
   league: MultiplayerLeague,
   playedRound: CompetitionFixture[],
+  currentWeek = league.currentWeek,
 ): WeekUserProgress[] => {
-  const week = league.currentWeek + 1;
+  const week = currentWeek + 1;
+  const seenTeamIds = new Set<string>();
   return league.teams
+    .filter((team) => {
+      if (team.isBot || seenTeamIds.has(team.id)) return false;
+      seenTeamIds.add(team.id);
+      return true;
+    })
     .map((team): WeekUserProgress | null => {
       const fixture = playedRound.find((item) => item.homeTeamId === team.id || item.awayTeamId === team.id);
       if (!fixture) return null;
@@ -931,6 +960,40 @@ const createWeekProgressEntries = (
     })
     .filter((progress): progress is WeekUserProgress => Boolean(progress));
 };
+
+export const getMissingWeekProgressEntries = (
+  league: MultiplayerLeague,
+  currentWeek = league.currentWeek,
+) => {
+  const round = league.fixtures[currentWeek] ?? [];
+  const expected = createWeekProgressEntries(league, round, currentWeek);
+  const existing = (league.weekProgress ?? []).filter((progress) => progress.week === currentWeek + 1);
+  return expected.filter((entry) => !existing.some((progress) => (
+    progress.userId === entry.userId
+    && progress.teamId === entry.teamId
+    && progress.matchId === entry.matchId
+  )));
+};
+
+export const isWeekReadyToAdvance = (
+  league: MultiplayerLeague,
+  currentWeek = league.currentWeek,
+) => {
+  const round = league.fixtures[currentWeek] ?? [];
+  const expected = createWeekProgressEntries(league, round, currentWeek);
+  if (expected.length === 0) return false;
+  const progress = (league.weekProgress ?? []).filter((entry) => entry.week === currentWeek + 1);
+  return expected.every((expectedEntry) => progress.some((entry) => (
+    entry.userId === expectedEntry.userId
+    && entry.teamId === expectedEntry.teamId
+    && entry.matchId === expectedEntry.matchId
+    && isWeekProgressDone(entry)
+  )));
+};
+
+export const isCurrentWeekReadyToAdvance = (league: MultiplayerLeague) => (
+  isWeekReadyToAdvance(league, league.currentWeek)
+);
 
 const buildWeekReports = (
   week: number,
@@ -963,21 +1026,25 @@ export const simulateWeek = (
 
   const inviteWeekGenerated = (league.mode ?? 'invite') === 'invite' && currentRound.some((fixture) => Boolean(fixture.result));
   if (inviteWeekGenerated) {
-    if (!isCurrentWeekReadyToAdvance(league)) {
+    const missingProgress = getMissingWeekProgressEntries(league);
+    const repairedLeague = missingProgress.length > 0
+      ? saveLeague({ ...league, weekProgress: [...(league.weekProgress ?? []), ...missingProgress] })
+      : league;
+    if (!isCurrentWeekReadyToAdvance(repairedLeague)) {
       throw new Error('Bu haftadaki kullanici maclari tamamlanmadi.');
     }
-    const allTeams = [...league.teams, ...league.botTeams];
-    const nextWeek = league.currentWeek + 1;
+    const allTeams = [...repairedLeague.teams, ...repairedLeague.botTeams];
+    const nextWeek = repairedLeague.currentWeek + 1;
     const playedAt = now();
     const nextLeague = saveLeague({
-      ...league,
+      ...repairedLeague,
       currentWeek: nextWeek,
-      standings: createStandingRows(allTeams.map((team) => team.id), allTeams, league.fixtures),
-      status: nextWeek >= league.fixtures.length ? 'completed' : 'active',
-      latestFixtureId: currentRound.find((fixture) => fixture.result)?.id ?? league.latestFixtureId,
+      standings: createStandingRows(allTeams.map((team) => team.id), allTeams, repairedLeague.fixtures),
+      status: nextWeek >= repairedLeague.fixtures.length ? 'completed' : 'active',
+      latestFixtureId: currentRound.find((fixture) => fixture.result)?.id ?? repairedLeague.latestFixtureId,
       matchReports: [
-        ...league.matchReports.filter((report) => !currentRound.some((fixture) => fixture.id === report.fixtureId)),
-        ...buildWeekReports(league.currentWeek + 1, currentRound, playedAt),
+        ...repairedLeague.matchReports.filter((report) => !currentRound.some((fixture) => fixture.id === report.fixtureId)),
+        ...buildWeekReports(repairedLeague.currentWeek + 1, currentRound, playedAt),
       ],
     });
     return { league: nextLeague, playedRound: currentRound };
@@ -1059,6 +1126,64 @@ export const updateWeekUserProgress = (
         }
         : item
     )),
+  });
+};
+
+export const repairCurrentWeekProgress = (leagueId: string, ownerId: string) => {
+  const league = loadLeague(leagueId);
+  if (!league) throw new Error('Lig bulunamadi.');
+  if (league.ownerId !== ownerId) throw new Error('Haftayi sadece lig sahibi onarabilir.');
+  if (league.status !== 'active') throw new Error('Lig aktif degil.');
+  const missing = getMissingWeekProgressEntries(league);
+  if (missing.length === 0) return league;
+  return saveLeague({
+    ...league,
+    weekProgress: [...(league.weekProgress ?? []), ...missing],
+  });
+};
+
+export const forceAdvanceCurrentWeek = (
+  leagueId: string,
+  ownerId: string,
+  dataset = getSeasonDataset(),
+) => {
+  let league = loadLeague(leagueId);
+  if (!league) throw new Error('Lig bulunamadi.');
+  if (league.ownerId !== ownerId) throw new Error('Haftayi sadece lig sahibi ilerletebilir.');
+  if (league.status !== 'active') throw new Error('Lig aktif degil.');
+  const round = league.fixtures[league.currentWeek] ?? [];
+  if (!round.some((fixture) => Boolean(fixture.result))) {
+    league = simulateWeek(leagueId, dataset).league;
+  }
+  league = repairCurrentWeekProgress(leagueId, ownerId);
+  const week = league.currentWeek + 1;
+  const timestamp = now();
+  league = saveLeague({
+    ...league,
+    weekProgress: (league.weekProgress ?? []).map((progress) => (
+      progress.week === week && !isWeekProgressDone(progress)
+        ? {
+          ...progress,
+          status: 'skipped' as const,
+          startedAt: progress.startedAt ?? timestamp,
+          completedAt: timestamp,
+          skippedAt: timestamp,
+        }
+        : progress
+    )),
+  });
+  return simulateWeek(league.id, dataset);
+};
+
+export const softDeleteLeague = (leagueId: string, ownerId: string) => {
+  const league = readLeagues().find((item) => item.id === leagueId);
+  if (!league) throw new Error('Lig bulunamadi.');
+  if (league.ownerId !== ownerId) throw new Error('Ligi sadece sahibi silebilir.');
+  return saveLeague({
+    ...league,
+    status: 'deleted',
+    deletedAt: now(),
+    deletedBy: ownerId,
   });
 };
 

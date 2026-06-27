@@ -18,9 +18,9 @@ import {
   type MomentumSample,
 } from '@/lib/matchAnimation';
 import MatchPitchAnimation from './MatchPitchAnimation';
+import type { SimulationSpeed } from '@/lib/multiplayerMatchPreferences';
 
 type MatchPhase = 'normal' | 'extra-time' | 'penalties' | 'finished';
-type SimulationSpeed = 'normal' | 'fast' | 'very-fast';
 
 interface TimelineEntry {
   id: string;
@@ -90,6 +90,10 @@ export default function LiveMatchPanel({
   onComplete,
   onSkip,
   simulationMode = 'quick',
+  initialAutoContinue = false,
+  initialSpeed = 'fast',
+  onAutoContinueChange,
+  onSpeedChange,
 }: {
   fixture: CompetitionFixture;
   result: MatchResult;
@@ -98,6 +102,10 @@ export default function LiveMatchPanel({
   onComplete: () => void;
   onSkip?: () => void;
   simulationMode?: 'quick' | 'manager';
+  initialAutoContinue?: boolean;
+  initialSpeed?: SimulationSpeed;
+  onAutoContinueChange?: (value: boolean) => void;
+  onSpeedChange?: (value: SimulationSpeed) => void;
 }) {
   const [minute, setMinute] = useState(0);
   const [phase, setPhase] = useState<MatchPhase>('normal');
@@ -105,11 +113,13 @@ export default function LiveMatchPanel({
   const [penaltyScore, setPenaltyScore] = useState({ home: 0, away: 0 });
   const [timeline, setTimeline] = useState<TimelineEntry[]>(createInitialTimeline);
   const [animationState, setAnimationState] = useState(createMatchAnimationState);
-  const [speed, setSpeed] = useState<SimulationSpeed>('fast');
-  const [autoContinue, setAutoContinue] = useState(false);
+  const [localSpeed, setLocalSpeed] = useState<SimulationSpeed>(initialSpeed);
+  const [localAutoContinue, setLocalAutoContinue] = useState(initialAutoContinue);
+  const speed = onSpeedChange ? initialSpeed : localSpeed;
+  const autoContinue = onAutoContinueChange ? initialAutoContinue : localAutoContinue;
   const [showRecovery, setShowRecovery] = useState(false);
-  const speedRef = useRef<SimulationSpeed>('fast');
-  const autoContinueRef = useRef(false);
+  const speedRef = useRef<SimulationSpeed>(initialSpeed);
+  const autoContinueRef = useRef(initialAutoContinue);
   const skipRef = useRef(false);
   const skipHandledRef = useRef(false);
   const completeHandledRef = useRef(false);
@@ -158,7 +168,6 @@ export default function LiveMatchPanel({
     skipRef.current = false;
     skipHandledRef.current = false;
     completeHandledRef.current = false;
-    speedRef.current = 'fast';
     clearPendingTimers();
     const isManagerMode = simulationMode === 'manager';
     const normalCheckpoints = isManagerMode ? MANAGER_CHECKPOINTS : CHECKPOINTS;
@@ -194,7 +203,6 @@ export default function LiveMatchPanel({
       setPenaltyScore({ home: 0, away: 0 });
       setTimeline(createInitialTimeline());
       setAnimationState(createMatchAnimationState());
-      setSpeed('fast');
       setShowRecovery(false);
       momentumSamples = [];
     };
@@ -381,7 +389,15 @@ export default function LiveMatchPanel({
 
   const setSimulationSpeed = (next: SimulationSpeed) => {
     speedRef.current = next;
-    setSpeed(next);
+    if (onSpeedChange) onSpeedChange(next);
+    else setLocalSpeed(next);
+  };
+
+  const toggleAutoContinue = () => {
+    const next = !autoContinue;
+    autoContinueRef.current = next;
+    if (onAutoContinueChange) onAutoContinueChange(next);
+    else setLocalAutoContinue(next);
   };
 
   const revealFinalResult = (entryText: string) => {
@@ -436,7 +452,7 @@ export default function LiveMatchPanel({
   };
 
   return (
-    <section className="mt-7 border-4 border-black bg-zinc-950 p-5 text-white shadow-[7px_7px_0px_0px_#000]">
+    <section className="mt-7 min-w-0 overflow-x-hidden border-4 border-black bg-zinc-950 p-3 text-white shadow-[4px_4px_0px_0px_#000] sm:p-5 sm:shadow-[7px_7px_0px_0px_#000]">
       <div className="flex flex-col gap-5 border-b-2 border-white/15 pb-5 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-green-400">Canlı Maç</p>
@@ -444,17 +460,17 @@ export default function LiveMatchPanel({
             {phase === 'penalties' ? 'PEN' : `${minute}'`}
           </p>
         </div>
-        <div className="grid flex-1 grid-cols-[1fr_auto_1fr] items-center gap-4">
-          <p className="text-right text-lg font-black uppercase">{homeName}</p>
+        <div className="grid w-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:gap-4">
+          <p className="min-w-0 break-words text-right text-xs font-black uppercase sm:text-lg">{homeName}</p>
           <div className="text-center">
-            <p className="whitespace-nowrap text-5xl font-black tabular-nums">{score.home} - {score.away}</p>
+            <p className="whitespace-nowrap text-3xl font-black tabular-nums sm:text-5xl">{score.home} - {score.away}</p>
             {(phase === 'penalties' || phase === 'finished') && result.penalties && (
               <p className="mt-1 text-xs font-black text-purple-300">
                 Penaltılar: {penaltyScore.home} - {penaltyScore.away}
               </p>
             )}
           </div>
-          <p className="text-left text-lg font-black uppercase">{awayName}</p>
+          <p className="min-w-0 break-words text-left text-xs font-black uppercase sm:text-lg">{awayName}</p>
         </div>
       </div>
 
@@ -475,13 +491,13 @@ export default function LiveMatchPanel({
         <LiveStat label="Faul" home={liveStats.foulsHome} away={liveStats.foulsAway} />
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {(['normal', 'fast', 'very-fast'] as SimulationSpeed[]).map((option) => (
           <button
             key={option}
             type="button"
             onClick={() => setSimulationSpeed(option)}
-            className={`game-button flex items-center gap-2 border-2 px-4 py-2 text-[10px] font-black uppercase ${
+            className={`game-button flex min-w-0 items-center justify-center gap-2 border-2 px-2 py-3 text-[9px] font-black uppercase sm:px-4 sm:py-2 sm:text-[10px] ${
               speed === option
                 ? 'border-yellow-400 bg-yellow-400 text-black'
                 : 'border-white/25 bg-zinc-900 text-white'
@@ -493,8 +509,8 @@ export default function LiveMatchPanel({
         ))}
         <button
           type="button"
-          onClick={() => setAutoContinue((value) => !value)}
-          className={`game-button flex items-center gap-2 border-2 px-4 py-2 text-[10px] font-black uppercase ${
+          onClick={toggleAutoContinue}
+          className={`game-button col-span-2 flex min-w-0 items-center justify-center gap-2 border-2 px-2 py-3 text-[9px] font-black uppercase sm:col-span-1 sm:px-4 sm:py-2 sm:text-[10px] ${
             autoContinue
               ? 'border-green-400 bg-green-500 text-black'
               : 'border-white/25 bg-zinc-900 text-white'

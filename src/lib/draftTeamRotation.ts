@@ -1,6 +1,9 @@
 export interface DraftSquadOption {
   id: string;
+  rating?: number;
 }
+
+export type DraftStrengthTier = 'strong' | 'medium' | 'weak';
 
 export interface DraftSquadPick<T extends DraftSquadOption> {
   squad: T | null;
@@ -25,6 +28,21 @@ export const getDraftSeenTeamCount = <T extends DraftSquadOption>(
   usedTeamIds: string[],
 ) => normalizeUsedTeamIds(squads, usedTeamIds).length;
 
+export const getDraftStrengthTier = <T extends DraftSquadOption>(
+  squads: T[],
+  squad: T,
+): DraftStrengthTier => {
+  const rated = squads
+    .filter((item) => typeof item.rating === 'number')
+    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  const rank = rated.findIndex((item) => item.id === squad.id);
+  if (rank < 0 || rated.length < 3) return 'medium';
+  const groupSize = Math.ceil(rated.length / 3);
+  if (rank < groupSize) return 'strong';
+  if (rank >= rated.length - groupSize) return 'weak';
+  return 'medium';
+};
+
 export const pickNextDraftSquad = <T extends DraftSquadOption>(
   squads: T[],
   usedTeamIds: string[] = [],
@@ -40,7 +58,11 @@ export const pickNextDraftSquad = <T extends DraftSquadOption>(
   const nonRepeatedCandidates = candidateSquads.length > 1 && excludedSquadId
     ? candidateSquads.filter((squad) => squad.id !== excludedSquadId)
     : candidateSquads;
-  const pool = nonRepeatedCandidates.length > 0 ? nonRepeatedCandidates : candidateSquads;
+  const basePool = nonRepeatedCandidates.length > 0 ? nonRepeatedCandidates : candidateSquads;
+  const tierSequence: DraftStrengthTier[] = ['strong', 'weak', 'medium'];
+  const targetTier = tierSequence[(cycleStarted ? 0 : normalizedUsedIds.length) % tierSequence.length];
+  const tierPool = basePool.filter((squad) => getDraftStrengthTier(squads, squad) === targetTier);
+  const pool = tierPool.length > 0 ? tierPool : basePool;
   const pickedSquad = pool[Math.floor(random() * pool.length)] ?? null;
 
   if (!pickedSquad) return { squad: null, usedTeamIds: normalizedUsedIds };

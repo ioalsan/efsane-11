@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pickNextDraftSquad, type DraftSquadPick } from '../src/lib/draftTeamRotation';
+import { getDraftStrengthTier, pickNextDraftSquad, type DraftSquadPick } from '../src/lib/draftTeamRotation';
 
 interface TestSquad {
   id: string;
@@ -74,4 +74,25 @@ test('draft rotation uses the same no-repeat rule for auto roll state updates', 
   }
 
   assert.equal(new Set(pickedIds).size, 10);
+});
+
+test('rated draft rotation alternates strong, weak and medium tiers without repeats', () => {
+  const squads = Array.from({ length: 18 }, (_, index) => ({
+    id: `rated-${index + 1}`,
+    rating: 86 - index,
+  }));
+  let usedTeamIds: string[] = [];
+  const tiers: string[] = [];
+  const pickedIds: string[] = [];
+
+  for (let index = 0; index < 18; index += 1) {
+    const pick = pickNextDraftSquad(squads, usedTeamIds, pickedIds.at(-1) ?? null, () => 0);
+    assert.ok(pick.squad);
+    pickedIds.push(pick.squad.id);
+    tiers.push(getDraftStrengthTier(squads, pick.squad));
+    usedTeamIds = pick.usedTeamIds;
+  }
+
+  assert.deepEqual(tiers.slice(0, 6), ['strong', 'weak', 'medium', 'strong', 'weak', 'medium']);
+  assert.equal(new Set(pickedIds).size, 18);
 });

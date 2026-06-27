@@ -6,13 +6,17 @@ import {
   createLeague,
   createLocalFriendLeague,
   getInviteLeagueStartReadiness,
+  getRealTeamChemistry,
   getRealTeamReplacementPlan,
+  isCurrentWeekReadyToAdvance,
   listLeagues,
+  repairCurrentWeekProgress,
   savePlayerSlotToLeague,
   saveTeamToLeague,
   simulateWeek,
   startLeague,
   startLocalFriendLeague,
+  softDeleteLeague,
   updateWeekUserProgress,
 } from '../src/lib/multiplayerService';
 import {
@@ -22,6 +26,7 @@ import {
   getTeamPlayers,
   toLegacyPlayer,
 } from '../src/lib/seasonRepository';
+import { filterMultiplayerLeagues } from '../src/lib/multiplayerLeagueList';
 
 const installLocalStorage = () => {
   const storage = new Map<string, string>();
@@ -282,6 +287,55 @@ test('invite league can start from a waiting state that already has real teams h
   assert.equal(restarted.fixtures.flat().length, 306);
 });
 
+test('invite league start normalizes legacy lobby and ready statuses but rejects completed', () => {
+  const dataset = getSeasonDataset();
+  const storageKey = 'canli11:multiplayer-leagues:v1';
+
+  (['lobby', 'ready'] as const).forEach((legacyStatus) => {
+    installLocalStorage();
+    const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+      .filter((team) => getTeamPlayers(team.id, dataset).length >= 18)
+      .slice(0, 2);
+    let league = createLeague({
+      name: `Legacy ${legacyStatus}`,
+      ownerId: 'owner-1',
+      maxUsers: 2,
+      powerLimit: 'free',
+    });
+
+    sourceTeams.forEach((sourceTeam, index) => {
+      const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+      league = saveTeamToLeague(league.id, buildMultiplayerTeamInput({
+        ownerId: `legacy-user-${index + 1}`,
+        teamName: `Legacy ${index + 1}`,
+        formation: '4-2-3-1',
+        tactic: 'Balanced',
+        captainId: players[0].id,
+        startingPlayers: players.slice(0, 11),
+        substitutes: players.slice(11, 18),
+        reserves: [],
+      }));
+    });
+
+    window.localStorage.setItem(storageKey, JSON.stringify([{ ...league, status: legacyStatus }]));
+    const restored = listLeagues()[0];
+    assert.equal(restored.status, 'waiting');
+    const started = startLeague(restored.id, 'owner-1', dataset);
+    assert.equal(started.status, 'active');
+    assert.equal(started.fixtures.flat().length, 306);
+  });
+
+  installLocalStorage();
+  const completed = createLeague({
+    name: 'Completed Reject',
+    ownerId: 'owner-1',
+    maxUsers: 2,
+    powerLimit: 'free',
+  });
+  window.localStorage.setItem(storageKey, JSON.stringify([{ ...completed, status: 'completed' }]));
+  assert.throws(() => startLeague(completed.id, 'owner-1', dataset), /zaten baslatildi/);
+});
+
 test('invite league waits for every user match progress before advancing the week', () => {
   installLocalStorage();
   const dataset = getSeasonDataset();
@@ -330,7 +384,7 @@ test('invite league waits for every user match progress before advancing the wee
   assert.equal(advanced.standings.some((row) => row.played > 0), true);
 });
 
-test('invite league can advance at least 20 generated weeks without getting stuck', () => {
+test('invite league completes all 34 weeks without getting stuck at week 19', () => {
   installLocalStorage();
   const dataset = getSeasonDataset();
   const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
@@ -339,7 +393,7 @@ test('invite league can advance at least 20 generated weeks without getting stuc
   assert.equal(sourceTeams.length, 2);
 
   let league = createLeague({
-    name: 'Yirmi Hafta Ligi',
+    name: 'Otuz Dort Hafta Ligi',
     ownerId: 'owner-1',
     maxUsers: 2,
     powerLimit: 'free',
@@ -361,12 +415,21 @@ test('invite league can advance at least 20 generated weeks without getting stuc
 
   league = startLeague(league.id, 'owner-1', dataset);
 
-  for (let week = 0; week < 20; week += 1) {
+  for (let week = 0; week < 34; week += 1) {
     league = simulateWeek(league.id, dataset).league;
     assert.equal(league.currentWeek, week);
     const progress = league.weekProgress.filter((item) => item.week === week + 1);
     assert.equal(progress.length, 2);
     assert.equal(progress.every((item) => item.status === 'pending'), true);
+
+    if (week === 18) {
+      const storageKey = 'canli11:multiplayer-leagues:v1';
+      const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]') as typeof league[];
+      window.localStorage.setItem(storageKey, JSON.stringify(stored.map((item) => ({
+        ...item,
+        weekProgress: item.weekProgress.map((entry) => entry.week === 1 ? { ...entry, status: 'pending' } : entry),
+      }))));
+    }
 
     updateWeekUserProgress(league.id, 'user-1', 'completed');
     updateWeekUserProgress(league.id, 'user-2', 'skipped');
@@ -374,8 +437,76 @@ test('invite league can advance at least 20 generated weeks without getting stuc
     assert.equal(league.currentWeek, week + 1);
   }
 
-  assert.equal(league.matchReports.length, 20 * league.fixtures[0].length);
-  assert.equal(league.standings.some((row) => row.played >= 20), true);
+  assert.equal(league.status, 'completed');
+  assert.equal(league.currentWeek, 34);
+  assert.equal(league.matchReports.length, 306);
+  assert.equal(new Set(league.matchReports.map((report) => report.fixtureId)).size, 306);
+  assert.equal(league.standings.every((row) => Number.isFinite(row.points) && row.played === 34), true);
+});
+
+test('repairs missing current-week progress and ignores older pending progress', () => {
+  installLocalStorage();
+  const dataset = getSeasonDataset();
+  const sourceTeams = getCompetitionTeams(DEFAULT_COMPETITION_ID, dataset)
+    .filter((team) => getTeamPlayers(team.id, dataset).length >= 18)
+    .slice(0, 2);
+  let league = createLeague({ name: 'Repair Ligi', ownerId: 'owner-1', maxUsers: 2, powerLimit: 'free' });
+  sourceTeams.forEach((sourceTeam, index) => {
+    const players = getTeamPlayers(sourceTeam.id, dataset).map(toLegacyPlayer);
+    league = saveTeamToLeague(league.id, buildMultiplayerTeamInput({
+      ownerId: `repair-user-${index + 1}`,
+      teamName: `Repair ${index + 1}`,
+      formation: '4-2-3-1',
+      tactic: 'Balanced',
+      captainId: players[0].id,
+      startingPlayers: players.slice(0, 11),
+      substitutes: players.slice(11, 18),
+      reserves: [],
+    }));
+  });
+  league = startLeague(league.id, 'owner-1', dataset);
+  league = simulateWeek(league.id, dataset).league;
+  const storageKey = 'canli11:multiplayer-leagues:v1';
+  const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]') as typeof league[];
+  window.localStorage.setItem(storageKey, JSON.stringify(stored.map((item) => (
+    item.id === league.id ? { ...item, weekProgress: item.weekProgress.slice(0, 1) } : item
+  ))));
+
+  assert.equal(isCurrentWeekReadyToAdvance(listLeagues()[0]), false);
+  league = repairCurrentWeekProgress(league.id, 'owner-1');
+  assert.equal(league.weekProgress.filter((entry) => entry.week === 1).length, 2);
+});
+
+test('only the owner can soft delete a local league and deleted leagues stay hidden', () => {
+  installLocalStorage();
+  const league = createLeague({ name: 'Silinecek Lig', ownerId: 'owner-1', maxUsers: 2, powerLimit: 'free' });
+  assert.throws(() => softDeleteLeague(league.id, 'other-user'), /sadece sahibi/);
+  softDeleteLeague(league.id, 'owner-1');
+  assert.equal(listLeagues().some((item) => item.id === league.id), false);
+});
+
+test('league filters keep open leagues first and exclude deleted records', () => {
+  installLocalStorage();
+  const base = createLeague({ name: 'Base', ownerId: 'owner-1', maxUsers: 2, powerLimit: 'free' });
+  const waiting = { ...base, id: 'waiting', status: 'waiting' as const, updatedAt: '2026-01-01T00:00:00.000Z' };
+  const active = { ...base, id: 'active', status: 'active' as const, updatedAt: '2026-01-02T00:00:00.000Z' };
+  const completed = { ...base, id: 'completed', ownerId: 'owner-2', status: 'completed' as const };
+  const deleted = { ...base, id: 'deleted', status: 'deleted' as const, deletedAt: '2026-01-03T00:00:00.000Z' };
+
+  assert.deepEqual(filterMultiplayerLeagues([waiting, completed, deleted, active], 'open').map((item) => item.id), ['active', 'waiting']);
+  assert.deepEqual(filterMultiplayerLeagues([waiting, completed, deleted, active], 'completed').map((item) => item.id), ['completed']);
+  assert.deepEqual(filterMultiplayerLeagues([waiting, completed, deleted, active], 'mine', 'owner-1').map((item) => item.id), ['active', 'waiting']);
+});
+
+test('real team chemistry varies by rating while staying in a safe range', () => {
+  const values = [
+    getRealTeamChemistry(68, 'weak-team'),
+    getRealTeamChemistry(76, 'medium-team'),
+    getRealTeamChemistry(84, 'strong-team'),
+  ];
+  assert.equal(values.every((value) => value >= 68 && value <= 88), true);
+  assert.equal(new Set(values).size > 1, true);
+  assert.equal(values[2] > values[0], true);
 });
 
 test('local friend league replaces the weakest real teams and creates a full 18-team season', () => {

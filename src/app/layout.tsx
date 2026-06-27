@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import CookieConsent from "@/components/CookieConsent";
 import SiteFooter from "@/components/SiteFooter";
@@ -7,6 +7,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Canlı11",
   description: "Canlı11 ile futbol kadronu kur, turnuva simülasyonuna katıl ve sonuçları paylaş.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 const adsenseClient = "ca-pub-7391885209764245";
