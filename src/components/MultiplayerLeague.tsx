@@ -17,7 +17,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
-import LiveMatchPanel from './LiveMatchPanel';
+import MatchEnginePanel from './MatchEnginePanel';
 import { useTeamStore } from '@/store/useTeamStore';
 import {
   createLeague,
@@ -98,6 +98,7 @@ import {
 import { getCurrentUserWatchProgress, shouldAutoAdvanceInviteWeek } from '@/lib/multiplayerMatchFlow';
 import { clearCanli11MultiplayerStorage } from '@/lib/multiplayerCleanup';
 import { filterMultiplayerLeagues, type MultiplayerLeagueListFilter } from '@/lib/multiplayerLeagueList';
+import { createMatchSessionId } from '@/lib/matchEngine';
 
 const maxUserOptions: MultiplayerMaxUsers[] = [2, 4, 8, 12, 18];
 const friendCountOptions = [2, 3, 4, 5];
@@ -131,7 +132,12 @@ const weekProgressLabels: Record<WeekUserProgress['status'], string> = {
   watching: 'İzleniyor',
   completed: 'Tamamlandı',
   skipped: 'Sonuca atlandı',
+  autoCompleted: 'Otomatik tamamlandı',
 };
+
+const isProgressDone = (status: WeekUserProgress['status']) => (
+  status === 'completed' || status === 'skipped' || status === 'autoCompleted'
+);
 
 type NoticeTone = 'info' | 'success' | 'error';
 
@@ -799,9 +805,12 @@ export default function MultiplayerLeague({
   const inviteStartReadiness = activeLeague?.mode === 'invite'
     ? getInviteLeagueStartReadiness(activeLeague, user?.id)
     : null;
+  const matchSessionId = activeLeague && user && liveFixture
+    ? createMatchSessionId(activeLeague.id, activeLeague.currentWeek, liveFixture.id, user.id)
+    : null;
   const waitingForUsers = activeLeague
     ? currentWeekProgress
-      .filter((progress) => progress.status !== 'completed' && progress.status !== 'skipped')
+      .filter((progress) => !isProgressDone(progress.status))
       .map((progress) => getTeamDisplayName(activeLeague, progress.teamId))
     : [];
   const activeUserTeamsCount = inviteStartReadiness?.userTeamsCount ?? activeLeague?.teams.length ?? 0;
@@ -1833,7 +1842,7 @@ export default function MultiplayerLeague({
   const openOwnGeneratedMatch = async (league: MultiplayerLeagueSave) => {
     if (!user || liveFixture) return;
     const progress = getCurrentWeekProgress(league).find((item) => item.userId === user.id);
-    if (!progress || progress.status === 'completed' || progress.status === 'skipped') return;
+    if (!progress || isProgressDone(progress.status)) return;
     const fixture = league.fixtures[league.currentWeek]?.find((item) => item.id === progress.matchId);
     if (!fixture?.result) return;
     if (progress.status === 'pending') await updateCurrentUserWeekProgress('watching');
@@ -2062,7 +2071,7 @@ export default function MultiplayerLeague({
       || !isOwner
       || !currentWeekGenerated
       || liveFixture
-      || (myWeekProgress && myWeekProgress.status !== 'completed' && myWeekProgress.status !== 'skipped')
+      || (myWeekProgress && !isProgressDone(myWeekProgress.status))
     ) return;
     const actionKey = `${activeLeagueIdValue}:${activeLeagueWeek}:auto-season`;
     if (autoSeasonWeekRef.current === actionKey || advanceInProgress) return;
@@ -2070,7 +2079,7 @@ export default function MultiplayerLeague({
       autoSeasonWeekRef.current = actionKey;
       setMatchFlowLastAction('auto-season-advancing');
       void forceAdvanceActionRef.current();
-    }, 2400);
+    }, 4000);
     return () => window.clearTimeout(timer);
   }, [
     activeLeagueIdValue,
@@ -3210,6 +3219,8 @@ export default function MultiplayerLeague({
                               <span>Progress: {myWeekProgress?.status ?? '-'}</span>
                               <span>ProgressCount: {currentWeekProgress.length}</span>
                               <span className="break-words">Waiting: {waitingForUsers.join(', ') || '-'}</span>
+                              <span className="break-all sm:col-span-2">MatchSession: {matchSessionId ?? '-'}</span>
+                              <span>ActiveMatch: {liveFixture?.id ?? '-'}</span>
                               <span>Advancing: {advanceInProgress || activeLeague.advancingWeek !== null && activeLeague.advancingWeek !== undefined ? 'true' : 'false'}</span>
                               <span>StartVersion: {activeLeague.startVersion ?? '-'}</span>
                               <span>AdvanceVersion: {activeLeague.advanceVersion ?? '-'}</span>
@@ -3224,6 +3235,15 @@ export default function MultiplayerLeague({
                                     Haftayi Tamamla ve Ilerle
                                   </button>
                                 </div>
+                              )}
+                              {myCurrentProgress && !liveFixture && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleWatchMyMatch(myCurrentProgress)}
+                                  className="game-button border-2 border-black bg-zinc-800 px-3 py-3 text-white sm:col-span-2 lg:col-span-4"
+                                >
+                                  Maci Yeniden Goster (Debug)
+                                </button>
                               )}
                             </div>
                           )}
@@ -3261,7 +3281,7 @@ export default function MultiplayerLeague({
                         {currentWeekProgress.map((progress) => {
                           const fixture = currentRound.find((item) => item.id === progress.matchId) ?? null;
                           const isMine = progress.userId === user?.id;
-                          const done = progress.status === 'completed' || progress.status === 'skipped';
+                          const done = isProgressDone(progress.status);
                           return (
                             <div
                               key={progress.id}
@@ -3276,25 +3296,18 @@ export default function MultiplayerLeague({
                                   <p className="mt-1 text-lg tabular-nums">{finalScore(fixture)?.home} - {finalScore(fixture)?.away}</p>
                                 )}
                               </div>
-                              {isMine && fixture?.result ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleWatchMyMatch(progress)}
-                                  disabled={done || Boolean(liveFixture)}
-                                  className="game-button flex items-center justify-center gap-2 border-2 border-black bg-black px-4 py-3 text-[10px] font-black uppercase text-white disabled:opacity-35"
-                                >
-                                  <Eye size={16} /> {done ? 'Sonuç Görüldü' : 'Maçımı İzle'}
-                                </button>
-                              ) : (
-                                <span className="text-[10px] opacity-60">{done ? 'Tamamlandi' : 'Bekleniyor'}</span>
-                              )}
+                              <span className="border border-black/25 bg-white/50 px-3 py-2 text-center text-[10px] opacity-70">
+                                {isMine
+                                  ? done ? 'Sonuc goruldu' : liveFixture ? 'Mac otomatik oynaniyor' : 'Otomatik baslatiliyor'
+                                  : done ? 'Tamamlandi' : 'Bekleniyor'}
+                              </span>
                             </div>
                           );
                         })}
                         {!currentWeekReadyToAdvance && (
                           <p className="border-2 border-dashed border-black/30 bg-white/45 p-3 text-[10px] font-black uppercase">
                             {currentWeekProgress
-                              .filter((progress) => progress.status !== 'completed' && progress.status !== 'skipped')
+                              .filter((progress) => !isProgressDone(progress.status))
                               .map((progress) => teamNameOf(progress.teamId))
                               .join(', ')} macini tamamlamasi bekleniyor.
                           </p>
@@ -3305,22 +3318,23 @@ export default function MultiplayerLeague({
 
                   {liveFixture?.result && (
                     <div ref={liveMatchRef} className="scroll-mt-24">
-                      <LiveMatchPanel
-                        key={`${activeLeague.id}-${activeLeague.currentWeek}-${liveFixture.id}`}
+                      <MatchEnginePanel
+                        key={matchSessionId ?? liveFixture.id}
+                        matchSessionId={matchSessionId ?? `${activeLeague.id}:${activeLeague.currentWeek}:${liveFixture.id}`}
                         fixture={liveFixture}
                         result={liveFixture.result}
                         homeName={teamNameOf(liveFixture.homeTeamId)}
                         awayName={teamNameOf(liveFixture.awayTeamId)}
-                        onComplete={() => {
+                        onCompleted={() => {
                           if (liveProgressId) void completeLiveMatch();
                           else setLiveFixture(null);
                         }}
-                        onSkip={() => {
+                        onSkipped={() => {
                           if (liveProgressId) void skipLiveMatch();
                         }}
-                        simulationMode="manager"
-                        initialAutoContinue={autoContinue}
-                        initialSpeed={matchSpeed}
+                        onDismissSkipped={() => void completeLiveMatch()}
+                        autoContinue={autoContinue}
+                        speed={matchSpeed}
                         onAutoContinueChange={handleAutoContinueChange}
                         onSpeedChange={handleMatchSpeedChange}
                       />

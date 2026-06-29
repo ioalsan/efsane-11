@@ -27,7 +27,7 @@ export type MultiplayerLeagueStatus = 'waiting' | 'active' | 'completed' | 'dele
 export type MultiplayerMaxUsers = number;
 export type MultiplayerPowerLimit = 'free' | 'balanced' | 'max80' | 'max85';
 export type MultiplayerLeagueMode = 'invite' | 'local-friends';
-export type WeekUserProgressStatus = 'pending' | 'watching' | 'completed' | 'skipped';
+export type WeekUserProgressStatus = 'pending' | 'watching' | 'completed' | 'skipped' | 'autoCompleted';
 
 export interface MultiplayerSquadSelection {
   startingXI: string[];
@@ -921,7 +921,7 @@ export const startLocalFriendLeague = (
   });
 };
 
-const progressDoneStatuses: WeekUserProgressStatus[] = ['completed', 'skipped'];
+const progressDoneStatuses: WeekUserProgressStatus[] = ['completed', 'skipped', 'autoCompleted'];
 
 const isWeekProgressDone = (progress: WeekUserProgress) => progressDoneStatuses.includes(progress.status);
 
@@ -1108,6 +1108,7 @@ export const updateWeekUserProgress = (
   userId: string,
   status: WeekUserProgressStatus,
 ) => {
+  if (status === 'autoCompleted') throw new Error('Otomatik tamamlama sadece lig sahibi tarafindan yapilabilir.');
   const league = loadLeague(leagueId);
   if (!league) throw new Error('Lig bulunamadi.');
   const progress = getCurrentWeekProgress(league).find((item) => item.userId === userId);
@@ -1164,7 +1165,7 @@ export const forceAdvanceCurrentWeek = (
       progress.week === week && !isWeekProgressDone(progress)
         ? {
           ...progress,
-          status: 'skipped' as const,
+          status: 'autoCompleted' as const,
           startedAt: progress.startedAt ?? timestamp,
           completedAt: timestamp,
           skippedAt: timestamp,
@@ -1173,6 +1174,26 @@ export const forceAdvanceCurrentWeek = (
     )),
   });
   return simulateWeek(league.id, dataset);
+};
+
+export const autoCompleteCurrentWeekProgress = (leagueId: string, ownerId: string) => {
+  const league = repairCurrentWeekProgress(leagueId, ownerId);
+  const week = league.currentWeek + 1;
+  const timestamp = now();
+  return saveLeague({
+    ...league,
+    weekProgress: (league.weekProgress ?? []).map((progress) => (
+      progress.week === week && !isWeekProgressDone(progress)
+        ? {
+          ...progress,
+          status: 'autoCompleted' as const,
+          startedAt: progress.startedAt ?? timestamp,
+          completedAt: timestamp,
+          skippedAt: progress.skippedAt ?? null,
+        }
+        : progress
+    )),
+  });
 };
 
 export const softDeleteLeague = (leagueId: string, ownerId: string) => {

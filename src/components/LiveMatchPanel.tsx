@@ -19,6 +19,7 @@ import {
 } from '@/lib/matchAnimation';
 import MatchPitchAnimation from './MatchPitchAnimation';
 import type { SimulationSpeed } from '@/lib/multiplayerMatchPreferences';
+import type { MatchEngineState } from '@/lib/matchEngine';
 
 type MatchPhase = 'normal' | 'extra-time' | 'penalties' | 'finished';
 
@@ -82,6 +83,16 @@ const createInitialTimeline = (): TimelineEntry[] => [{
 
 const finalScoreOf = (result: MatchResult) => result.extraTime ?? result.normalTime;
 
+export interface LiveMatchEngineDebug {
+  engineState: MatchEngineState;
+  engineStartedAt: string;
+  engineTick: number;
+  lastEngineAction: string;
+  duplicateCompletionPrevented: boolean;
+  timerCount: number;
+  timerActive: boolean;
+}
+
 export default function LiveMatchPanel({
   fixture,
   result,
@@ -89,11 +100,13 @@ export default function LiveMatchPanel({
   awayName,
   onComplete,
   onSkip,
+  onDismissSkipped,
   simulationMode = 'quick',
   initialAutoContinue = false,
   initialSpeed = 'fast',
   onAutoContinueChange,
   onSpeedChange,
+  onEngineDebug,
 }: {
   fixture: CompetitionFixture;
   result: MatchResult;
@@ -101,11 +114,13 @@ export default function LiveMatchPanel({
   awayName: string;
   onComplete: () => void;
   onSkip?: () => void;
+  onDismissSkipped?: () => void;
   simulationMode?: 'quick' | 'manager';
   initialAutoContinue?: boolean;
   initialSpeed?: SimulationSpeed;
   onAutoContinueChange?: (value: boolean) => void;
   onSpeedChange?: (value: SimulationSpeed) => void;
+  onEngineDebug?: (debug: LiveMatchEngineDebug) => void;
 }) {
   const [minute, setMinute] = useState(0);
   const [phase, setPhase] = useState<MatchPhase>('normal');
@@ -118,6 +133,10 @@ export default function LiveMatchPanel({
   const speed = onSpeedChange ? initialSpeed : localSpeed;
   const autoContinue = onAutoContinueChange ? initialAutoContinue : localAutoContinue;
   const [showRecovery, setShowRecovery] = useState(false);
+  const [engineState, setEngineState] = useState<MatchEngineState>('preparing');
+  const [lastEngineAction, setLastEngineAction] = useState('preparing');
+  const [duplicateCompletionPrevented, setDuplicateCompletionPrevented] = useState(false);
+  const engineStartedAtRef = useRef(new Date().toISOString());
   const speedRef = useRef<SimulationSpeed>(initialSpeed);
   const autoContinueRef = useRef(initialAutoContinue);
   const skipRef = useRef(false);
@@ -126,10 +145,15 @@ export default function LiveMatchPanel({
   const manualAnimationSequenceRef = useRef(0);
   const timeoutIdsRef = useRef<Array<{ id: number; resolve: () => void }>>([]);
   const completeRef = useRef(onComplete);
+  const dismissSkippedRef = useRef(onDismissSkipped);
 
   useEffect(() => {
     completeRef.current = onComplete;
   }, [onComplete]);
+
+  useEffect(() => {
+    dismissSkippedRef.current = onDismissSkipped;
+  }, [onDismissSkipped]);
 
   useEffect(() => {
     autoContinueRef.current = autoContinue;
@@ -144,11 +168,34 @@ export default function LiveMatchPanel({
   }, []);
 
   const completeOnce = useCallback(() => {
-    if (completeHandledRef.current) return;
+    if (completeHandledRef.current) {
+      setDuplicateCompletionPrevented(true);
+      return;
+    }
     completeHandledRef.current = true;
     clearPendingTimers();
+    if (skipHandledRef.current) {
+      setEngineState('skipped');
+      setLastEngineAction('skipped-dismissed');
+      dismissSkippedRef.current?.();
+      return;
+    }
+    setEngineState('completed');
+    setLastEngineAction('completed');
     completeRef.current();
   }, [clearPendingTimers]);
+
+  useEffect(() => {
+    onEngineDebug?.({
+      engineState,
+      engineStartedAt: engineStartedAtRef.current,
+      engineTick: minute,
+      lastEngineAction,
+      duplicateCompletionPrevented,
+      timerCount: timeoutIdsRef.current.length,
+      timerActive: timeoutIdsRef.current.length > 0,
+    });
+  }, [duplicateCompletionPrevented, engineState, lastEngineAction, minute, onEngineDebug]);
 
   useEffect(() => {
     if (!autoContinue || phase !== 'finished' || completeHandledRef.current) return;
@@ -315,6 +362,10 @@ export default function LiveMatchPanel({
     const run = async () => {
       await trackedDelay(0);
       if (cancelled) return;
+      engineStartedAtRef.current = new Date().toISOString();
+      setDuplicateCompletionPrevented(false);
+      setEngineState('running');
+      setLastEngineAction('simulation-running');
       resetMatchState();
 
       const recoveryTimeout = window.setTimeout(() => {
@@ -364,6 +415,8 @@ export default function LiveMatchPanel({
       if (cancelled || skipRef.current) return;
       const finalScore = finalScoreOf(result);
       setPhase('finished');
+      setEngineState('finished');
+      setLastEngineAction('simulation-finished');
       setMinute(result.extraTime ? 120 : 90);
       setScore(finalScore);
       setPenaltyScore(result.penalties ?? { home: 0, away: 0 });
@@ -380,7 +433,12 @@ export default function LiveMatchPanel({
       }
     };
 
-    void run();
+    void run().catch(() => {
+      if (cancelled) return;
+      setEngineState('error');
+      setLastEngineAction('simulation-error');
+      setShowRecovery(true);
+    });
     return () => {
       cancelled = true;
       clearPendingTimers();
@@ -433,6 +491,8 @@ export default function LiveMatchPanel({
     skipRef.current = true;
     clearPendingTimers();
     setSimulationSpeed('very-fast');
+    setEngineState('skipped');
+    setLastEngineAction('result-skipped');
     revealFinalResult('Sonuca atlandı. Final skoru gösteriliyor.');
     onSkip?.();
   };

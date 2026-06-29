@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildMultiplayerTeamInput,
+  autoCompleteCurrentWeekProgress,
   consumeMultiplayerMigrationNotice,
   createLeague,
   createLocalFriendLeague,
@@ -432,7 +433,15 @@ test('invite league completes all 34 weeks without getting stuck at week 19', ()
     }
 
     updateWeekUserProgress(league.id, 'user-1', 'completed');
-    updateWeekUserProgress(league.id, 'user-2', 'skipped');
+    assert.throws(
+      () => updateWeekUserProgress(league.id, 'user-2', 'autoCompleted'),
+      /sadece lig sahibi/,
+    );
+    league = autoCompleteCurrentWeekProgress(league.id, 'owner-1');
+    assert.equal(
+      league.weekProgress.find((item) => item.week === week + 1 && item.userId === 'user-2')?.status,
+      'autoCompleted',
+    );
     league = simulateWeek(league.id, dataset).league;
     assert.equal(league.currentWeek, week + 1);
   }

@@ -68,6 +68,7 @@ service cloud.firestore {
             && request.resource.data.week == resource.data.week
             && request.resource.data.teamId == resource.data.teamId
             && request.resource.data.matchId == resource.data.matchId
+            && request.resource.data.status in ['pending', 'watching', 'completed', 'skipped']
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'status',
               'startedAt',

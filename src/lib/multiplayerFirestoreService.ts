@@ -842,6 +842,7 @@ export const updateWeekUserProgress = async (
   leagueId: string,
   status: WeekUserProgressStatus,
 ) => {
+  if (status === 'autoCompleted') throw new Error('Otomatik tamamlama sadece lig sahibi tarafindan yapilabilir.');
   const { db, user } = await getFirebaseOrThrow();
   const league = await loadOnlineLeague(db, leagueId);
   const progress = (league.weekProgress ?? [])
@@ -888,6 +889,50 @@ export const repairCurrentWeekProgress = async (leagueId: string) => {
   };
 };
 
+export const autoCompleteCurrentWeekProgress = async (
+  leagueId: string,
+  expectedCurrentWeek?: number,
+) => {
+  const { db, user } = await getFirebaseOrThrow();
+  let league = await loadOnlineLeague(db, leagueId);
+  if (league.ownerId !== user.uid) throw new Error('Progress kayitlarini sadece lig sahibi otomatik tamamlayabilir.');
+  if (league.status !== 'active') throw new Error('Lig aktif degil.');
+  if (typeof expectedCurrentWeek === 'number' && league.currentWeek !== expectedCurrentWeek) {
+    throw new Error('Bu hafta baska bir cihazda zaten ilerletildi.');
+  }
+  league = await repairCurrentWeekProgress(leagueId);
+  const week = league.currentWeek + 1;
+  const timestamp = now();
+  const nextProgress = (league.weekProgress ?? [])
+    .filter((progress) => progress.week === week)
+    .map((progress): WeekUserProgress => (
+      progress.status === 'completed' || progress.status === 'skipped' || progress.status === 'autoCompleted'
+        ? progress
+        : {
+          ...progress,
+          status: 'autoCompleted',
+          startedAt: progress.startedAt ?? timestamp,
+          completedAt: timestamp,
+          skippedAt: progress.skippedAt ?? null,
+        }
+    ));
+  const writes = nextProgress.map((progress) => (
+    (batch: ReturnType<typeof writeBatch>) => batch.set(
+      doc(db, 'leagues', leagueId, 'weekProgress', progress.id),
+      clean(progress),
+    )
+  ));
+  await commitBatchedWrites(db, writes);
+  await updateDoc(leagueRef(db, leagueId), { updatedAt: timestamp });
+  return {
+    ...league,
+    weekProgress: (league.weekProgress ?? []).map((progress) => (
+      nextProgress.find((item) => item.id === progress.id) ?? progress
+    )),
+    updatedAt: timestamp,
+  };
+};
+
 export const forceAdvanceCurrentWeek = async (
   leagueId: string,
   dataset = getSeasonDataset(),
@@ -904,29 +949,7 @@ export const forceAdvanceCurrentWeek = async (
   if (!currentRound.some((fixture) => Boolean(fixture.result))) {
     league = (await simulateWeek(leagueId, dataset, league.currentWeek)).league;
   }
-  league = await repairCurrentWeekProgress(leagueId);
-  const week = league.currentWeek + 1;
-  const timestamp = now();
-  const currentProgress = (league.weekProgress ?? []).filter((progress) => progress.week === week);
-  const nextProgress = currentProgress.map((progress): WeekUserProgress => (
-    progress.status === 'completed' || progress.status === 'skipped'
-      ? progress
-      : {
-        ...progress,
-        status: 'skipped',
-        startedAt: progress.startedAt ?? timestamp,
-        completedAt: timestamp,
-        skippedAt: timestamp,
-      }
-  ));
-  const writes = nextProgress.map((progress) => (
-    (batch: ReturnType<typeof writeBatch>) => batch.set(
-      doc(db, 'leagues', leagueId, 'weekProgress', progress.id),
-      clean(progress),
-    )
-  ));
-  await commitBatchedWrites(db, writes);
-  await updateDoc(leagueRef(db, leagueId), { updatedAt: timestamp });
+  league = await autoCompleteCurrentWeekProgress(leagueId, league.currentWeek);
   return simulateWeek(leagueId, dataset, league.currentWeek);
 };
 
