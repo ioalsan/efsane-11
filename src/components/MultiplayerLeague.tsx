@@ -2159,10 +2159,10 @@ export default function MultiplayerLeague({
   );
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-7xl space-y-6 overflow-x-hidden px-1 pb-2">
-      <section className="border-4 border-black bg-zinc-950 p-5 text-white shadow-[8px_8px_0px_0px_#000]">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+    <div className="mx-auto w-full min-w-0 max-w-[1500px] space-y-6 pb-2">
+      <section className="min-w-0 border-4 border-black bg-zinc-950 p-5 text-white shadow-[8px_8px_0px_0px_#000]">
+        <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.24em] text-green-400">Asenkron Multiplayer</p>
             <h2 className="text-4xl font-black uppercase italic tracking-tighter">
               {focusMode === 'invite' ? 'Davetli Lig' : 'Arkadaş Ligi'}
@@ -2173,7 +2173,7 @@ export default function MultiplayerLeague({
               <span>{onlineConfigured ? (onlineReady ? 'Firebase online' : 'Firebase baglaniyor') : 'Offline Demo'}</span>
             </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
             <input
               value={managerName}
               onChange={(event) => setManagerName(event.target.value)}
@@ -2197,8 +2197,8 @@ export default function MultiplayerLeague({
         )}
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
-        <aside className="flex flex-col gap-5">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)]">
+        <aside className="flex min-w-0 flex-col gap-5">
           <section className={`border-4 border-black bg-green-700 p-5 text-white shadow-[6px_6px_0px_0px_#000] ${focusMode === 'invite' ? 'order-2' : 'order-1'}`}>
             <div className="mb-4 flex items-center gap-2 border-b border-white/20 pb-3">
               <Users className="text-yellow-300" size={18} />
@@ -2446,7 +2446,7 @@ export default function MultiplayerLeague({
           </section>
         </aside>
 
-        <section className="space-y-5">
+        <section className="min-w-0 space-y-5">
           {!activeLeague ? (
             <section className="grid min-h-[420px] place-items-center border-4 border-black bg-white p-8 text-center text-black shadow-[6px_6px_0px_0px_#000]">
               <div>
@@ -2457,16 +2457,16 @@ export default function MultiplayerLeague({
             </section>
           ) : (
             <>
-              <section className="border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
-                <div className="flex flex-col gap-4 border-b-2 border-black pb-4 md:flex-row md:items-center md:justify-between">
-                  <div>
+              <section className="min-w-0 border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
+                <div className="flex min-w-0 flex-col gap-4 border-b-2 border-black pb-4 md:flex-row md:flex-wrap md:items-center md:justify-between">
+                  <div className="min-w-0">
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-55">Bekleme Odası</p>
                     <h3 className="text-3xl font-black uppercase italic">{activeLeague.name}</h3>
                     <p className="mt-1 text-xs font-black uppercase text-yellow-700">
                     {statusLabels[activeLeague.status]} / {activeCompetition?.competitionName ?? 'Süper Lig'} / {powerLimitLabels[activeLeague.powerLimit]} / {activeLeague.mode === 'invite' ? `${activeLeague.maxUsers} kullanici takimi` : '18 takim'}
                     </p>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="border-2 border-black bg-zinc-950 px-5 py-3 text-center text-white">
                       <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/45">Kod</p>
                       <p className="text-2xl font-black tracking-[0.22em]">{activeLeague.inviteCode}</p>
@@ -2481,7 +2481,7 @@ export default function MultiplayerLeague({
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div className="mt-4 grid min-w-0 grid-cols-2 gap-3 2xl:grid-cols-4">
                   <MiniStat label="Kullanıcı" value={`${inviteStartReadiness?.userTeamsCount ?? activeLeague.teams.length}/${activeUserTeamTarget}`} />
                   <MiniStat label="Gercek Takim" value={botSlots} />
                   <MiniStat label="Hafta" value={seasonWeekCount ? `${Math.min(activeLeague.currentWeek + 1, seasonWeekCount)}/${seasonWeekCount}` : '-'} />
@@ -2537,7 +2537,7 @@ export default function MultiplayerLeague({
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1.2fr]">
+                    <div className="mt-4 grid min-w-0 gap-3 2xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_minmax(0,1.8fr)]">
                       <input
                         value={activeDraft.displayName}
                         onChange={(event) => updateActiveDraft({ displayName: event.target.value })}
@@ -2552,7 +2552,7 @@ export default function MultiplayerLeague({
                         className="border-2 border-yellow-400/60 bg-black/70 px-3 py-3 text-xs font-black uppercase text-white outline-none"
                         placeholder="Takim adi zorunlu"
                       />
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 2xl:grid-cols-5">
                         {FORMATIONS.map((item) => (
                           <button
                             key={item.id}
@@ -2586,8 +2586,8 @@ export default function MultiplayerLeague({
                     )}
                   </section>
 
-                  <div className="grid gap-5 xl:grid-cols-[minmax(280px,320px)_minmax(520px,1fr)_minmax(300px,360px)]">
-                    <div ref={activePitchRef} className="xl:order-2">
+                  <div className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(240px,280px)_minmax(460px,1fr)_minmax(240px,280px)]">
+                    <div ref={activePitchRef} className="min-w-0 2xl:order-2">
                       <FriendPitchBoard
                         draft={activeDraft}
                         playerById={playerById}
@@ -2602,7 +2602,7 @@ export default function MultiplayerLeague({
                       />
                     </div>
 
-                    <div ref={activeDraftPanelRef} className="xl:order-1">
+                    <div ref={activeDraftPanelRef} className="min-w-0 2xl:order-1">
                       <DraftRollPanel
                         draft={activeDraft}
                         rolledSquad={activeRolledSquad}
@@ -2622,7 +2622,7 @@ export default function MultiplayerLeague({
                       />
                     </div>
 
-                    <div className="xl:order-3">
+                    <div className="min-w-0 2xl:order-3">
                       <SelectedPlacementPanel
                         player={pendingPlacementPlayer}
                         team={pendingPlacementPlayer?.teamId ? teamById.get(pendingPlacementPlayer.teamId) ?? null : null}
@@ -2632,7 +2632,7 @@ export default function MultiplayerLeague({
                     </div>
                   </div>
 
-                  <div className="grid gap-5 xl:grid-cols-[360px_1fr_1fr]">
+                  <div className="grid min-w-0 gap-5 2xl:grid-cols-[320px_minmax(0,1fr)_minmax(0,1fr)]">
                     <section className="border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
                       <div className="flex items-center gap-2 border-b-2 border-black pb-3">
                         <ShieldCheck className="text-green-700" size={18} />
@@ -2881,14 +2881,14 @@ export default function MultiplayerLeague({
               )}
 
               {activeLeague.status === 'waiting' && !isLocalFriendLeague && (
-                <section className="space-y-5">
-                  <div className="border-4 border-black bg-zinc-950 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
-                    <div className="flex flex-col gap-3 border-b border-white/15 pb-4 md:flex-row md:items-center md:justify-between">
-                      <div>
+                <section className="min-w-0 space-y-5">
+                  <div className="min-w-0 border-4 border-black bg-zinc-950 p-5 text-white shadow-[6px_6px_0px_0px_#000]">
+                    <div className="flex min-w-0 flex-col gap-3 border-b border-white/15 pb-4 md:flex-row md:flex-wrap md:items-center md:justify-between">
+                      <div className="min-w-0">
                         <p className="text-[10px] font-black uppercase tracking-[0.2em] text-green-400">Takımını Kaydet</p>
                         <h3 className="text-2xl font-black uppercase italic">{inviteDraft.teamName.trim() || squadName}</h3>
                       </div>
-                      <div ref={inviteSaveRef} className="flex flex-wrap gap-2">
+                      <div ref={inviteSaveRef} className="flex min-w-0 max-w-full flex-wrap gap-2 md:justify-end">
                         <button
                           type="button"
                           onClick={onBackToQuick}
@@ -2899,7 +2899,7 @@ export default function MultiplayerLeague({
                         <button
                           type="button"
                           onClick={importQuickTeamToInviteDraft}
-                          className="game-button border-2 border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase text-white"
+                          className="game-button max-w-full whitespace-normal border-2 border-white/20 bg-white/10 px-4 py-3 text-center text-xs font-black uppercase text-white"
                         >
                           HIZLI OYNA KADROSUNU AKTAR
                         </button>
@@ -2921,14 +2921,14 @@ export default function MultiplayerLeague({
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <div className="mt-4 grid min-w-0 grid-cols-2 gap-3 2xl:grid-cols-4">
                       <MiniStat dark label="İlk 11" value={`${getRosterCount(inviteDraft.startingXI)}/11`} />
                       <MiniStat dark label="Yedek" value={`${getRosterCount(inviteDraft.substitutes)}/7`} />
                       <MiniStat dark label="Guc" value={teamPreview?.rating ?? '-'} />
                       <MiniStat dark label="Kimya" value={teamPreview?.chemistry ?? '-'} />
                     </div>
 
-                    <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1.2fr]">
+                    <div className="mt-4 grid min-w-0 gap-3 2xl:grid-cols-[minmax(180px,1fr)_minmax(0,2fr)_minmax(220px,1.2fr)]">
                       <input
                         value={inviteDraft.teamName}
                         onChange={(event) => updateInviteDraft({ teamName: event.target.value })}
@@ -2936,7 +2936,7 @@ export default function MultiplayerLeague({
                         className="border-2 border-yellow-400/60 bg-black/70 px-3 py-3 text-xs font-black uppercase text-white outline-none"
                         placeholder="Takım adı"
                       />
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 2xl:grid-cols-5">
                         {FORMATIONS.map((item) => (
                           <button
                             key={item.id}
@@ -2977,8 +2977,8 @@ export default function MultiplayerLeague({
                       </div>
                     )}
 
-                    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(280px,320px)_minmax(520px,1fr)_minmax(300px,360px)]">
-                      <div ref={inviteDraftPanelRef} className="xl:order-1">
+                    <div className="mt-5 grid min-w-0 gap-5 2xl:grid-cols-[minmax(240px,280px)_minmax(460px,1fr)_minmax(240px,280px)]">
+                      <div ref={inviteDraftPanelRef} className="min-w-0 2xl:order-1">
                         <DraftRollPanel
                           draft={inviteRollDraft}
                           rolledSquad={inviteRolledSquad}
@@ -3022,7 +3022,7 @@ export default function MultiplayerLeague({
                         </div>
                       </section>
 
-                      <div className="xl:order-3">
+                      <div className="min-w-0 2xl:order-3">
                         <SelectedPlacementPanel
                           player={invitePlacementPlayer}
                           team={invitePlacementPlayer?.teamId ? teamById.get(invitePlacementPlayer.teamId) ?? null : null}
@@ -3031,7 +3031,7 @@ export default function MultiplayerLeague({
                         />
                       </div>
 
-                      <div ref={invitePitchRef} className="xl:order-2">
+                      <div ref={invitePitchRef} className="min-w-0 2xl:order-2">
                         <FriendPitchBoard
                           draft={invitePitchDraft}
                           playerById={playerById}

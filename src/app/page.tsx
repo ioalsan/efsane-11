@@ -245,15 +245,15 @@ export default function Home() {
   if (gameMode === 'multiplayer') {
     return (
       <main className={`min-h-screen flex flex-col transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
-        <header className="flex flex-col gap-4 border-b-2 border-black bg-zinc-900 p-5 text-white sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
+        <header className="flex min-w-0 flex-col gap-4 border-b-2 border-black bg-zinc-900 p-5 text-white sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <Users size={24} className="text-green-400" />
             <div>
               <h1 className="text-2xl font-black uppercase italic tracking-tighter">CANLI11</h1>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Multiplayer Lig</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
             <button
               type="button"
               onClick={() => setGameMode('quick')}
@@ -277,7 +277,7 @@ export default function Home() {
             </button>
           </div>
         </header>
-        <div className="flex-1 overflow-y-auto p-4 lg:p-10">
+        <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-10">
           <MultiplayerLeague onBackToQuick={() => setGameMode('quick')} focusMode={multiplayerFocus} />
         </div>
         <AdSlot placement="mobile-sticky" />
