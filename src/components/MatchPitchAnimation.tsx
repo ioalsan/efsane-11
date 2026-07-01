@@ -136,7 +136,10 @@ export default function MatchPitchAnimation({
   });
 
   return (
-    <section className="mt-5 border-2 border-white/15 bg-zinc-900 p-3 shadow-[4px_4px_0px_0px_#000]" aria-label="2D canlı maç sahası">
+    <section
+      className={`mt-5 border-2 bg-zinc-900 p-3 shadow-[4px_4px_0px_0px_#000] ${isGoalEvent ? 'border-yellow-300' : 'border-white/15'}`}
+      aria-label="2D canlı maç sahası"
+    >
       <div className="mb-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-2 border-black bg-zinc-950 px-3 py-2 shadow-[3px_3px_0px_0px_#000]">
         <div className="min-w-0">
           <p className="truncate text-[10px] font-black uppercase text-yellow-300">{homeName}</p>
@@ -144,7 +147,11 @@ export default function MatchPitchAnimation({
         </div>
         <div className="text-center">
           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-green-300">{state.minuteLabel} / {state.label}</p>
-          <p className={`text-4xl font-black tabular-nums leading-none ${isGoalEvent ? 'text-yellow-300' : 'text-white'}`}>
+          <div className={`mt-1 inline-flex items-center gap-2 border border-white/10 px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] ${isGoalEvent ? 'bg-yellow-400 text-black' : 'bg-white/5 text-white/70'}`}>
+            <span className="h-2 w-2 rounded-full bg-current" />
+            {state.side === 'home' ? 'Ev sahibi atakta' : state.side === 'away' ? 'Deplasman atakta' : 'Oyun dengeli'}
+          </div>
+          <p className={`mt-2 text-5xl font-black tabular-nums leading-none sm:text-6xl ${isGoalEvent ? 'text-yellow-300' : 'text-white'}`}>
             {score.home} - {score.away}
           </p>
           {showPenaltyScore && (
@@ -174,7 +181,7 @@ export default function MatchPitchAnimation({
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-md overflow-hidden border-2 border-black bg-[#10251a] shadow-[5px_5px_0px_0px_#000]">
+      <div className="mx-auto w-full max-w-3xl overflow-hidden border-2 border-black bg-[#10251a] shadow-[5px_5px_0px_0px_#000]">
         <svg
           viewBox="0 0 100 140"
           className="w-full"

@@ -50,18 +50,24 @@ export default function DraggablePlayer({ player }: DraggablePlayerProps) {
   return (
     <div
       onClick={handleClick}
-      className={`player-card relative grid min-h-11 grid-cols-[3rem_minmax(0,1fr)_auto_2.4rem] items-center gap-2 border-b border-black/25 px-3 py-2 transition-all cursor-pointer select-none
+      className={`player-card relative grid min-h-14 grid-cols-[3rem_minmax(0,1fr)_auto_2.4rem] items-start gap-2 border-b border-black/25 px-3 py-2 transition-all cursor-pointer select-none
         ${isSelectedForClickPlace
           ? 'player-card-selected text-yellow-100 outline outline-2 outline-yellow-500 -outline-offset-2'
           : (isDark ? 'hover:brightness-110' : 'hover:brightness-105')
         }
       `}
+      title={player.name}
     >
       <div className="card-scan-line" />
       <div className="text-sm font-black tabular-nums text-white/65">
         #{player.jersey_number}
       </div>
-      <h3 className="min-w-0 truncate text-sm font-black leading-tight tracking-tight text-white">
+      <h3
+        className="min-w-0 whitespace-normal break-words text-sm font-black leading-tight tracking-tight text-white"
+        style={{
+          overflowWrap: 'anywhere',
+        }}
+      >
         {player.name}
       </h3>
       <div className={`text-[10px] font-black uppercase tracking-tight whitespace-nowrap ${positionTone}`}>

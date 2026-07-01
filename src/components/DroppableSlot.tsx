@@ -87,6 +87,7 @@ export default function DroppableSlot({ index, player, allowedPosition }: Droppa
         ${sourceSlotIndex === index ? 'z-30' : 'z-10'}
         ${isSlotFull ? '' : 'border-2 border-dashed border-white/20'}
       `}
+      title={player?.name ?? allowedPosition}
     >
       {player ? (
         <div key={player.id} className={`player-card player-card-pop ${isCaptain ? 'is-captain' : ''} w-full h-full border-2 border-black flex flex-col items-center justify-center shadow-[2px_2px_0px_0px_#000] relative
@@ -100,8 +101,15 @@ export default function DroppableSlot({ index, player, allowedPosition }: Droppa
             </div>
           )}
           <div className="text-xl font-black text-white">{player.jersey_number}</div>
-          <div className="absolute -bottom-7 bg-black text-[9px] font-black uppercase px-2 py-0.5 border border-zinc-700 whitespace-nowrap text-white">
-            {player.name}
+          <div className="absolute -bottom-8 left-1/2 w-24 -translate-x-1/2 bg-black px-2 py-0.5 border border-zinc-700 text-center text-[8px] font-black uppercase text-white sm:-bottom-9 sm:w-32">
+            <span
+              className="block whitespace-normal break-words leading-tight"
+              style={{
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {player.name}
+            </span>
           </div>
           <div className="card-rating-badge absolute -top-3 -right-3 flex h-6 w-6 items-center justify-center border border-black text-[10px] font-black shadow-[1px_1px_0px_0px_#000]">
             {showRating ? player.overall_rating : '?'}
