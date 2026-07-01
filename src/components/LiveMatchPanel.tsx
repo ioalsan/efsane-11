@@ -17,21 +17,21 @@ import {
   type MatchVisualEvent,
   type MomentumSample,
 } from '@/lib/matchAnimation';
+import {
+  buildMatchSummary,
+  describeIncident,
+  flowTextForMinute,
+  toneForMinute,
+  type MatchTimelineEntry,
+} from '@/lib/matchPresentation';
 import MatchPitchAnimation from './MatchPitchAnimation';
 import type { SimulationSpeed } from '@/lib/multiplayerMatchPreferences';
 import type { MatchEngineState } from '@/lib/matchEngine';
 
 type MatchPhase = 'normal' | 'extra-time' | 'penalties' | 'finished';
 
-interface TimelineEntry {
-  id: string;
-  minute: string;
-  text: string;
-  tone: 'neutral' | 'goal' | 'warning' | 'danger' | 'change' | 'penalty';
-}
-
-const CHECKPOINTS = [5, 12, 23, 37, 45, 60, 75, 90];
-const EXTRA_TIME_CHECKPOINTS = [105, 120];
+const CHECKPOINTS = [5, 12, 23, 37, 45, 46, 60, 75, 90];
+const EXTRA_TIME_CHECKPOINTS = [91, 105, 120];
 const MANAGER_CHECKPOINTS = [3, 6, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 90];
 const MANAGER_EXTRA_TIME_CHECKPOINTS = [95, 100, 105, 110, 115, 120];
 const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -41,31 +41,7 @@ const speedLabels: Record<SimulationSpeed, string> = {
   fast: 'Hızlı',
   'very-fast': 'Çok hızlı',
 };
-
-const incidentText = (incident: MatchIncident, teamName: string) => {
-  if (incident.type === 'goal') return `GOL - ${teamName}: ${incident.playerName}`;
-  if (incident.type === 'yellow-card') return `Sarı kart - ${incident.playerName}`;
-  if (incident.type === 'substitution') return `Oyuncu değişikliği - ${incident.relatedPlayerName ?? 'Oyuncu'} çıktı, ${incident.playerName} girdi`;
-  return `Sakatlık - ${incident.playerName}`;
-};
-
-const incidentTone = (incident: MatchIncident): TimelineEntry['tone'] => {
-  if (incident.type === 'goal') return 'goal';
-  if (incident.type === 'yellow-card') return 'warning';
-  if (incident.type === 'substitution') return 'change';
-  return 'danger';
-};
-
-const flowText = (event: MatchVisualEvent, sideName: string) => {
-  if (event === 'pass') return `${sideName} pas trafiği kuruyor`;
-  if (event === 'attack') return `${sideName} hücuma çıkıyor`;
-  if (event === 'shot') return `${sideName} şut açısı arıyor`;
-  if (event === 'save') return 'Kaleci bölgesinde tehlike savuşturuldu';
-  if (event === 'foul') return 'Faul düdüğü, oyun kısa süre durdu';
-  return 'Oyun akıyor';
-};
-
-const toneClasses: Record<TimelineEntry['tone'], string> = {
+const toneClasses: Record<MatchTimelineEntry['tone'], string> = {
   neutral: 'border-white/15 bg-white/5',
   goal: 'border-green-400 bg-green-500/15 text-green-300',
   warning: 'border-yellow-400 bg-yellow-500/15 text-yellow-200',
@@ -74,10 +50,10 @@ const toneClasses: Record<TimelineEntry['tone'], string> = {
   penalty: 'border-purple-400 bg-purple-500/15 text-purple-200',
 };
 
-const createInitialTimeline = (): TimelineEntry[] => [{
+const createInitialTimeline = (): MatchTimelineEntry[] => [{
   id: 'kick-off',
   minute: "0'",
-  text: 'Maç başladı',
+  text: 'Başlama düdüğü',
   tone: 'neutral',
 }];
 
@@ -102,7 +78,8 @@ export default function LiveMatchPanel({
   onSkip,
   onDismissSkipped,
   simulationMode = 'quick',
-  initialAutoContinue = false,
+  autoContinue,
+  initialAutoContinue = true,
   initialSpeed = 'fast',
   onAutoContinueChange,
   onSpeedChange,
@@ -116,6 +93,7 @@ export default function LiveMatchPanel({
   onSkip?: () => void;
   onDismissSkipped?: () => void;
   simulationMode?: 'quick' | 'manager';
+  autoContinue?: boolean;
   initialAutoContinue?: boolean;
   initialSpeed?: SimulationSpeed;
   onAutoContinueChange?: (value: boolean) => void;
@@ -126,19 +104,19 @@ export default function LiveMatchPanel({
   const [phase, setPhase] = useState<MatchPhase>('normal');
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [penaltyScore, setPenaltyScore] = useState({ home: 0, away: 0 });
-  const [timeline, setTimeline] = useState<TimelineEntry[]>(createInitialTimeline);
+  const [timeline, setTimeline] = useState<MatchTimelineEntry[]>(createInitialTimeline);
   const [animationState, setAnimationState] = useState(createMatchAnimationState);
   const [localSpeed, setLocalSpeed] = useState<SimulationSpeed>(initialSpeed);
   const [localAutoContinue, setLocalAutoContinue] = useState(initialAutoContinue);
   const speed = onSpeedChange ? initialSpeed : localSpeed;
-  const autoContinue = onAutoContinueChange ? initialAutoContinue : localAutoContinue;
+  const autoContinueEnabled = autoContinue ?? localAutoContinue;
   const [showRecovery, setShowRecovery] = useState(false);
   const [engineState, setEngineState] = useState<MatchEngineState>('preparing');
   const [lastEngineAction, setLastEngineAction] = useState('preparing');
   const [duplicateCompletionPrevented, setDuplicateCompletionPrevented] = useState(false);
   const engineStartedAtRef = useRef(new Date().toISOString());
   const speedRef = useRef<SimulationSpeed>(initialSpeed);
-  const autoContinueRef = useRef(initialAutoContinue);
+  const autoContinueRef = useRef(autoContinueEnabled);
   const skipRef = useRef(false);
   const skipHandledRef = useRef(false);
   const completeHandledRef = useRef(false);
@@ -156,8 +134,8 @@ export default function LiveMatchPanel({
   }, [onDismissSkipped]);
 
   useEffect(() => {
-    autoContinueRef.current = autoContinue;
-  }, [autoContinue]);
+    autoContinueRef.current = autoContinueEnabled;
+  }, [autoContinueEnabled]);
 
   const clearPendingTimers = useCallback(() => {
     timeoutIdsRef.current.forEach(({ id, resolve }) => {
@@ -198,12 +176,12 @@ export default function LiveMatchPanel({
   }, [duplicateCompletionPrevented, engineState, lastEngineAction, minute, onEngineDebug]);
 
   useEffect(() => {
-    if (!autoContinue || phase !== 'finished' || completeHandledRef.current) return;
+    if (!autoContinueEnabled || phase !== 'finished' || completeHandledRef.current) return;
     const timeoutId = window.setTimeout(() => completeOnce(), 1400);
     return () => window.clearTimeout(timeoutId);
-  }, [autoContinue, completeOnce, phase]);
+  }, [autoContinueEnabled, completeOnce, phase]);
 
-  const addEntry = (entry: TimelineEntry) => {
+  const addEntry = (entry: MatchTimelineEntry) => {
     setTimeline((items) => [...items, entry]);
   };
 
@@ -270,7 +248,7 @@ export default function LiveMatchPanel({
       }));
     };
 
-    const revealIncident = async (incident: MatchIncident, index: number) => {
+    const revealIncident = async (incident: MatchIncident) => {
       if (cancelled || skipRef.current) return;
       const side: MatchSide = incident.teamId === fixture.homeTeamId ? 'home' : 'away';
       if (incident.type === 'goal') {
@@ -291,15 +269,12 @@ export default function LiveMatchPanel({
         side,
         `${incident.minute}'`,
       );
-      addEntry({
-        id: `incident-${incident.minute}-${index}`,
-        minute: `${incident.minute}'`,
-        text: incidentText(
-          incident,
-          incident.teamId === fixture.homeTeamId ? homeName : awayName,
-        ),
-        tone: incidentTone(incident),
-      });
+      addEntry(describeIncident(
+        incident,
+        fixture,
+        homeName,
+        awayName,
+      ));
       await wait();
     };
 
@@ -328,19 +303,25 @@ export default function LiveMatchPanel({
             side,
             `${moment}'`,
           );
-          if (isManagerMode && flowEvent !== 'halftime') {
+          addEntry({
+            id: `flow-${moment}`,
+            minute: `${moment}'`,
+            text: flowTextForMinute(moment, side === 'home' ? homeName : awayName),
+            tone: toneForMinute(moment),
+          });
+          if (moment % 29 === 0) {
             addEntry({
-              id: `flow-${moment}`,
+              id: `corner-${moment}`,
               minute: `${moment}'`,
-              text: flowText(flowEvent, side === 'home' ? homeName : awayName),
-              tone: flowEvent === 'foul' ? 'warning' : 'neutral',
+              text: `${moment}' Korner tehlikesi`,
+              tone: 'warning',
             });
           }
           await wait();
         }
         for (let index = 0; index < currentIncidents.length; index += 1) {
           if (cancelled || skipRef.current) return;
-          await revealIncident(currentIncidents[index], index);
+          await revealIncident(currentIncidents[index]);
         }
       }
     };
@@ -443,7 +424,7 @@ export default function LiveMatchPanel({
       cancelled = true;
       clearPendingTimers();
     };
-  }, [awayName, clearPendingTimers, completeOnce, fixture.awayTeamId, fixture.homeTeamId, homeName, result, simulationMode]);
+  }, [awayName, clearPendingTimers, completeOnce, fixture, homeName, result, simulationMode]);
 
   const setSimulationSpeed = (next: SimulationSpeed) => {
     speedRef.current = next;
@@ -452,7 +433,7 @@ export default function LiveMatchPanel({
   };
 
   const toggleAutoContinue = () => {
-    const next = !autoContinue;
+    const next = !autoContinueEnabled;
     autoContinueRef.current = next;
     if (onAutoContinueChange) onAutoContinueChange(next);
     else setLocalAutoContinue(next);
@@ -510,6 +491,7 @@ export default function LiveMatchPanel({
     foulsHome: Math.round(result.stats.foulsHome * statProgress),
     foulsAway: Math.round(result.stats.foulsAway * statProgress),
   };
+  const summary = buildMatchSummary(fixture, result, homeName, awayName);
 
   return (
     <section className="mt-7 min-w-0 overflow-x-hidden border-4 border-black bg-zinc-950 p-3 text-white shadow-[4px_4px_0px_0px_#000] sm:p-5 sm:shadow-[7px_7px_0px_0px_#000]">
@@ -571,12 +553,12 @@ export default function LiveMatchPanel({
           type="button"
           onClick={toggleAutoContinue}
           className={`game-button col-span-2 flex min-w-0 items-center justify-center gap-2 border-2 px-2 py-3 text-[9px] font-black uppercase sm:col-span-1 sm:px-4 sm:py-2 sm:text-[10px] ${
-            autoContinue
+            autoContinueEnabled
               ? 'border-green-400 bg-green-500 text-black'
               : 'border-white/25 bg-zinc-900 text-white'
           }`}
         >
-          <RefreshCw size={16} /> Auto devam: {autoContinue ? 'Açık' : 'Kapalı'}
+          <RefreshCw size={16} /> Auto devam: {autoContinueEnabled ? 'Açık' : 'Kapalı'}
         </button>
         <button
           type="button"
@@ -592,7 +574,7 @@ export default function LiveMatchPanel({
             onClick={completeOnce}
             className="game-button flex items-center gap-2 border-2 border-black bg-green-500 px-4 py-2 text-[10px] font-black uppercase text-black"
           >
-            <CheckCircle2 size={16} /> {autoContinue ? 'Otomatik devam ediyor' : 'Devam et'}
+            <CheckCircle2 size={16} /> {autoContinueEnabled ? 'Otomatik devam ediyor' : 'Devam et'}
           </button>
         )}
         {showRecovery && phase !== 'finished' && (
@@ -608,7 +590,7 @@ export default function LiveMatchPanel({
 
       {phase === 'finished' && (
         <p className="mt-3 border-2 border-green-400 bg-green-500/10 p-3 text-xs font-black uppercase text-green-200">
-          Maç tamamlandı. {autoContinue ? 'Kısa süre sonra otomatik devam edilecek.' : 'Devam etmek için butona bas.'}
+          Maç tamamlandı. {autoContinueEnabled ? 'Kısa süre sonra otomatik devam edilecek.' : 'Devam etmek için butona bas.'}
         </p>
       )}
 
@@ -625,7 +607,61 @@ export default function LiveMatchPanel({
           </div>
         ))}
       </div>
+
+      {phase === 'finished' && (
+        <section className="mt-5 border-2 border-white/15 bg-black/35 p-3 sm:p-4">
+          <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-300">Maç Özeti</p>
+              <h3 className="mt-1 text-lg font-black uppercase text-white">Final raporu</h3>
+            </div>
+            <div className="text-right">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/45">Final skor</p>
+              <p className="text-3xl font-black tabular-nums text-yellow-300">{summary.scoreLine}</p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <MatchSummaryTile label="Maçın adamı" value={summary.manOfTheMatch} />
+              <MatchSummaryTile label="Toplam şut" value={summary.totalShots} />
+              <MatchSummaryTile label="İsabetli şut" value={summary.shotsOnTarget} />
+              <MatchSummaryTile label="Topla oynama" value={summary.possession} />
+            </div>
+            <div className="border border-white/10 bg-zinc-950/80 p-3">
+              <p className="text-[9px] font-black uppercase tracking-[0.16em] text-white/45">Gol dakikaları</p>
+              <p className="mt-1 text-sm font-black text-white">{summary.goalMinutes}</p>
+              <div className="mt-4 space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.16em] text-white/45">Önemli anlar</p>
+                {summary.keyMoments.length > 0 ? summary.keyMoments.map((moment, index) => (
+                  <div key={`${summary.scoreLine}-${index}-${moment.slice(0, 18)}`} className="border border-white/10 bg-white/5 px-2 py-2 text-[10px] font-black uppercase text-white/80">
+                    {moment}
+                  </div>
+                )) : (
+                  <div className="border border-white/10 bg-white/5 px-2 py-2 text-[10px] font-black uppercase text-white/45">
+                    Önemli olay yok
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </section>
+  );
+}
+
+function MatchSummaryTile({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="border border-white/10 bg-zinc-950/80 p-3">
+      <p className="text-[9px] font-black uppercase tracking-[0.16em] text-white/45">{label}</p>
+      <p className="mt-2 break-words text-sm font-black uppercase text-white">{value}</p>
+    </div>
   );
 }
 

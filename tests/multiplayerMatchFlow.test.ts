@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  getNextMultiplayerMatchPreferences,
   readMultiplayerMatchPreferences,
   writeMultiplayerAutoContinue,
   writeMultiplayerAutoSeason,
@@ -46,6 +47,24 @@ test('multiplayer auto continue and match speed survive week changes', () => {
     autoContinue: true,
     autoSeason: true,
     speed: 'very-fast',
+  });
+});
+
+test('multiplayer match preferences do not reload or reset without a league/user key', () => {
+  const storage = createStorage();
+  writeMultiplayerAutoContinue(storage, 'league-1', 'user-1', true);
+  const current = getNextMultiplayerMatchPreferences(storage, 'league-1:user-1', 'league-1', 'user-1');
+  assert.equal(current, null);
+  const missingLeague = getNextMultiplayerMatchPreferences(storage, 'league-1:user-1', null, 'user-1');
+  assert.equal(missingLeague, null);
+  const next = getNextMultiplayerMatchPreferences(storage, 'league-1:user-1', 'league-2', 'user-1');
+  assert.deepEqual(next, {
+    key: 'league-2:user-1',
+    preferences: {
+      autoContinue: true,
+      autoSeason: false,
+      speed: 'fast',
+    },
   });
 });
 

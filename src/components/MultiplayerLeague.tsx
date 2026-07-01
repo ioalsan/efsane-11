@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Copy,
   Crown,
@@ -89,7 +89,8 @@ import type { Player, SeasonTeam, Squad } from '@/types';
 import Pitch from './Pitch';
 import {
   defaultMultiplayerMatchPreferences,
-  readMultiplayerMatchPreferences,
+  getMultiplayerMatchPreferenceKeys,
+  getNextMultiplayerMatchPreferences,
   writeMultiplayerAutoContinue,
   writeMultiplayerAutoSeason,
   writeMultiplayerMatchSpeed,
@@ -188,6 +189,12 @@ interface StartDebugState {
 
 type RosterTarget = 'startingXI' | 'substitutes';
 const draftTargetTotal = 18;
+const twoLineClampStyle: CSSProperties = {
+  display: '-webkit-box',
+  WebkitBoxOrient: 'vertical',
+  WebkitLineClamp: 2,
+  overflow: 'hidden',
+};
 
 interface SlotDraft {
   displayName: string;
@@ -217,6 +224,17 @@ interface InviteDraft {
   pickAvailable: boolean;
   autoRoll: boolean;
 }
+
+type DraftGuideDraft = {
+  teamName: string;
+  formation: FormationType | null;
+  tactic: ManagerMentality | null;
+  captainId: string | null;
+  startingXI: string[];
+  substitutes: string[];
+  rolledSquadId: string | null;
+  pickAvailable: boolean;
+};
 
 type PlacementSource = 'pool' | 'draft' | RosterTarget;
 
@@ -284,6 +302,111 @@ const isInviteDraftDirty = (draft: InviteDraft) => (
   draft.pickAvailable ||
   draft.autoRoll
 );
+
+const getDraftGuideStepIndex = (draft: DraftGuideDraft, pendingPlayer: Player | null) => {
+  const startingCount = getRosterCount(draft.startingXI);
+  const substituteCount = getRosterCount(draft.substitutes);
+
+  if (!draft.teamName.trim()) return 0;
+  if (!draft.formation) return 1;
+  if (!draft.tactic) return 2;
+  if (!draft.pickAvailable && !pendingPlayer && startingCount < 11 && substituteCount < 7) return 3;
+  if (draft.pickAvailable && !pendingPlayer) return 4;
+  if (pendingPlayer) return 5;
+  if (startingCount < 11) return 6;
+  if (substituteCount < 7) return 7;
+  if (!draft.captainId) return 8;
+  return 9;
+};
+
+function DraftStepGuide({
+  draft,
+  pendingPlayer,
+  canSave,
+}: {
+  draft: DraftGuideDraft;
+  pendingPlayer: Player | null;
+  canSave: boolean;
+}) {
+  const steps = [
+    { label: 'Takım adı gir' },
+    { label: 'Diziliş seç' },
+    { label: 'Taktik seç' },
+    { label: 'Takım çevir' },
+    { label: 'Oyuncu seç' },
+    { label: 'Uygun mevkiye yerleştir' },
+    { label: 'İlk 11 tamamla' },
+    { label: 'Yedekleri doldur' },
+    { label: 'Kaptan seç' },
+    { label: 'Takımı kaydet' },
+  ];
+  const currentStepIndex = getDraftGuideStepIndex(draft, pendingPlayer);
+  const startingCount = getRosterCount(draft.startingXI);
+  const substituteCount = getRosterCount(draft.substitutes);
+  const summary = !draft.teamName.trim()
+    ? 'Önce takım adını gir.'
+    : !draft.formation
+      ? 'Sonra dizilişi seç.'
+      : !draft.tactic
+        ? 'Ardından taktiği belirle.'
+        : draft.pickAvailable && !pendingPlayer
+          ? 'Şimdi gelen takımdan 1 oyuncu seç.'
+          : pendingPlayer
+            ? 'Oyuncuyu uygun saha slotuna yerleştir.'
+            : startingCount < 11
+              ? 'Yeni takım çevir ve ilk 11’i tamamla.'
+              : substituteCount < 7
+                ? 'Yedekleri doldur.'
+                : !draft.captainId
+                  ? 'Kaptanı seç.'
+                  : canSave
+                    ? 'Takımı kaydetmeye hazırsın.'
+                    : 'Eksik alanları tamamla.';
+
+  return (
+    <section className="border-4 border-black bg-white p-5 text-black shadow-[6px_6px_0px_0px_#000]">
+      <div className="flex items-center justify-between gap-3 border-b-2 border-black pb-3">
+        <div className="min-w-0">
+          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-600">Yeni kullanıcı rehberi</p>
+          <h3 className="mt-1 text-lg font-black uppercase italic">Sıradaki Adım</h3>
+        </div>
+        <span className="shrink-0 border-2 border-black bg-black px-3 py-1 text-[10px] font-black uppercase text-yellow-400">
+          {currentStepIndex + 1}/10
+        </span>
+      </div>
+      <p className="mt-3 text-sm font-black uppercase leading-relaxed">
+        {summary}
+      </p>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        {steps.map((step, index) => {
+          const state = index < currentStepIndex ? 'done' : index === currentStepIndex ? 'current' : 'next';
+          return (
+            <div
+              key={step.label}
+              className={`min-h-16 border-2 border-black px-3 py-2 text-[10px] font-black uppercase leading-tight ${
+                state === 'done'
+                  ? 'bg-green-100 text-green-900'
+                  : state === 'current'
+                    ? 'bg-yellow-400 text-black'
+                    : 'bg-zinc-100 text-black/55'
+              }`}
+              aria-current={state === 'current' ? 'step' : undefined}
+            >
+              <span className="block text-[9px] opacity-60">{index + 1}</span>
+              <span
+                className="mt-1 block"
+                style={twoLineClampStyle}
+                title={step.label}
+              >
+                {step.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 const parseStoredInviteDraft = (value: unknown): InviteDraft | null => {
   if (!value || typeof value !== 'object') return null;
@@ -619,6 +742,9 @@ export default function MultiplayerLeague({
   const [autoSeason, setAutoSeason] = useState(defaultMultiplayerMatchPreferences.autoSeason);
   const [matchSpeed, setMatchSpeed] = useState<SimulationSpeed>(defaultMultiplayerMatchPreferences.speed);
   const [matchPreferencesKey, setMatchPreferencesKey] = useState<string | null>(null);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [lastAutoContinueSetter, setLastAutoContinueSetter] = useState<'user-toggle' | 'initial-load' | 'cleanup' | 'unknown'>('unknown');
+  const [lastAutoContinueChangeAt, setLastAutoContinueChangeAt] = useState<string | null>(null);
   const [matchFlowLastAction, setMatchFlowLastAction] = useState('idle');
   const [lastFirestoreError, setLastFirestoreError] = useState<string | null>(null);
   const [advanceInProgress, setAdvanceInProgress] = useState(false);
@@ -630,6 +756,13 @@ export default function MultiplayerLeague({
   const [pendingPlacementSource, setPendingPlacementSource] = useState<PlacementSelection | null>(null);
   const [inviteDraft, setInviteDraft] = useState<InviteDraft>(() => createEmptyInviteDraft());
   const [invitePlacement, setInvitePlacement] = useState<PlacementSelection | null>(null);
+
+  const effectiveAutoContinue = autoSeason ? true : autoContinue;
+  const setAutoContinueTracked = useCallback((value: boolean, source: 'user-toggle' | 'initial-load' | 'cleanup' | 'unknown' = 'unknown') => {
+    setLastAutoContinueSetter(source);
+    setLastAutoContinueChangeAt(new Date().toISOString());
+    setAutoContinue(value);
+  }, []);
 
   const onlineConfigured = isFirebaseConfigured();
 
@@ -1104,20 +1237,18 @@ export default function MultiplayerLeague({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (!activeLeagueIdValue || !user?.id) {
-        setMatchPreferencesKey(null);
-        setAutoContinue(defaultMultiplayerMatchPreferences.autoContinue);
-        setAutoSeason(defaultMultiplayerMatchPreferences.autoSeason);
-        setMatchSpeed(defaultMultiplayerMatchPreferences.speed);
-        return;
-      }
-      const nextKey = `${activeLeagueIdValue}:${user.id}`;
-      if (matchPreferencesKey === nextKey) return;
-      const preferences = readMultiplayerMatchPreferences(window.localStorage, activeLeagueIdValue, user.id);
-      setMatchPreferencesKey(nextKey);
-      setAutoContinue(preferences.autoContinue);
-      setAutoSeason(preferences.autoSeason);
-      setMatchSpeed(preferences.speed);
+      const nextPreferences = getNextMultiplayerMatchPreferences(
+        window.localStorage,
+        matchPreferencesKey,
+        activeLeagueIdValue,
+        user?.id,
+      );
+      if (!nextPreferences) return;
+      setMatchPreferencesKey(nextPreferences.key);
+      setAutoContinueTracked(nextPreferences.preferences.autoContinue, 'initial-load');
+      setPreferencesLoaded(true);
+      setAutoSeason(nextPreferences.preferences.autoSeason);
+      setMatchSpeed(nextPreferences.preferences.speed);
       autoOpenedProgressRef.current = null;
       autoGeneratedWeekRef.current = null;
       autoAdvancedWeekRef.current = null;
@@ -1125,7 +1256,7 @@ export default function MultiplayerLeague({
       setMatchFlowLastAction('preferences-restored');
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeLeagueIdValue, matchPreferencesKey, user?.id]);
+  }, [activeLeagueIdValue, matchPreferencesKey, setAutoContinueTracked, user?.id]);
 
   useEffect(() => {
     if (!shouldScrollToLive || !liveFixture?.result) return;
@@ -1894,7 +2025,7 @@ export default function MultiplayerLeague({
       setLiveProgressId(null);
       setLiveSkipped(false);
       liveSkippedRef.current = false;
-      setMatchFlowLastAction(autoContinue ? 'auto-match-completed' : 'manual-match-completed');
+      setMatchFlowLastAction(effectiveAutoContinue ? 'auto-match-completed' : 'manual-match-completed');
       window.setTimeout(() => scrollToElement(weekFlowRef.current), 150);
     } catch (error) {
       setResultNotice('error', getErrorMessage(error));
@@ -1902,7 +2033,7 @@ export default function MultiplayerLeague({
   };
 
   const handleAutoContinueChange = (value: boolean) => {
-    setAutoContinue(value);
+    setAutoContinueTracked(value, 'user-toggle');
     if (activeLeagueIdValue && user?.id) {
       writeMultiplayerAutoContinue(window.localStorage, activeLeagueIdValue, user.id, value);
     }
@@ -1996,7 +2127,7 @@ export default function MultiplayerLeague({
     const removedKeys = clearCanli11MultiplayerStorage(window.localStorage);
     const removedSessionKeys = clearCanli11MultiplayerStorage(window.sessionStorage);
     setInviteDraft(createEmptyInviteDraft());
-    setAutoContinue(false);
+    setAutoContinueTracked(false, 'cleanup');
     setAutoSeason(false);
     setMatchSpeed(defaultMultiplayerMatchPreferences.speed);
     refreshLeagues(undefined);
@@ -2584,6 +2715,14 @@ export default function MultiplayerLeague({
                         Takim ortalamasi {powerCap} limitini asiyor.
                       </div>
                     )}
+
+                    <div className="mt-4">
+                      <DraftStepGuide
+                        draft={activeDraft}
+                        pendingPlayer={pendingPlacementPlayer}
+                        canSave={activeSlotReadyToSave && !activeSlotExceedsPowerLimit}
+                      />
+                    </div>
                   </section>
 
                   <div className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(240px,280px)_minmax(460px,1fr)_minmax(240px,280px)]">
@@ -2977,6 +3116,14 @@ export default function MultiplayerLeague({
                       </div>
                     )}
 
+                    <div className="mt-4">
+                      <DraftStepGuide
+                        draft={inviteDraft}
+                        pendingPlayer={invitePlacementPlayer}
+                        canSave={Boolean(teamPreview) && inviteSaveIssues.length === 0 && !exceedsPowerLimit}
+                      />
+                    </div>
+
                     <div className="mt-5 grid min-w-0 gap-5 2xl:grid-cols-[minmax(240px,280px)_minmax(460px,1fr)_minmax(240px,280px)]">
                       <div ref={inviteDraftPanelRef} className="min-w-0 2xl:order-1">
                         <DraftRollPanel
@@ -3185,9 +3332,9 @@ export default function MultiplayerLeague({
                             <button
                               type="button"
                               onClick={() => handleAutoContinueChange(!autoContinue)}
-                              className={`game-button border-2 border-black px-3 py-2 ${autoContinue ? 'bg-green-500' : 'bg-white'}`}
+                              className={`game-button border-2 border-black px-3 py-2 ${effectiveAutoContinue ? 'bg-green-500' : 'bg-white'}`}
                             >
-                              Auto Devam: {autoContinue ? 'Acik' : 'Kapali'}
+                              Auto Devam: {effectiveAutoContinue ? 'Acik' : 'Kapali'}
                             </button>
                             {isOwner && (
                               <button
@@ -3214,7 +3361,16 @@ export default function MultiplayerLeague({
                               <span>IsOwner: {isOwner ? 'evet' : 'hayir'}</span>
                               <span>Status: {activeLeague.status}</span>
                               <span>Hafta: {Math.min(activeLeague.currentWeek + 1, seasonWeekCount)}/{seasonWeekCount}</span>
-                              <span>AutoContinue: {autoContinue ? 'true' : 'false'}</span>
+                              <span>AutoContinue: {effectiveAutoContinue ? 'true' : 'false'}</span>
+                              <span>PreferencesLoaded: {preferencesLoaded ? 'true' : 'false'}</span>
+                              <span>PrefsKey: {matchPreferencesKey ?? '-'}</span>
+                              <span>RawAutoContinue: {
+                                typeof window !== 'undefined' && activeLeagueIdValue && user?.id
+                                  ? window.localStorage.getItem(getMultiplayerMatchPreferenceKeys(activeLeagueIdValue, user.id).autoContinue) ?? '-'
+                                  : '-'
+                              }</span>
+                              <span>LastAutoContinueSetter: {lastAutoContinueSetter}</span>
+                              <span>LastAutoContinueChangeAt: {lastAutoContinueChangeAt ?? '-'}</span>
                               <span>AutoSeason: {autoSeason ? 'true' : 'false'}</span>
                               <span>Progress: {myWeekProgress?.status ?? '-'}</span>
                               <span>ProgressCount: {currentWeekProgress.length}</span>
@@ -3333,7 +3489,7 @@ export default function MultiplayerLeague({
                           if (liveProgressId) void skipLiveMatch();
                         }}
                         onDismissSkipped={() => void completeLiveMatch()}
-                        autoContinue={autoContinue}
+                        autoContinue={effectiveAutoContinue}
                         speed={matchSpeed}
                         onAutoContinueChange={handleAutoContinueChange}
                         onSpeedChange={handleMatchSpeedChange}
@@ -3461,19 +3617,30 @@ function PremiumPlayerCard({
 }) {
   const stats = getPlayerStats(player);
   const content = (
-    <>
+    <div className="space-y-3">
+      <div className="min-w-0 border-b border-white/10 pb-2">
+        <PlayerNameText
+          text={player.name}
+          className="text-[15px] font-black uppercase text-white sm:text-[17px]"
+        />
+      </div>
       <div className="flex items-start gap-3">
         <PlayerPortrait player={player} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black uppercase text-white">{player.name}</p>
-              <p className="mt-1 truncate text-[10px] font-black uppercase text-yellow-300">{positionLabel(player.position)} / {team?.name ?? 'Takim'}</p>
-              <p className="mt-1 truncate text-[9px] font-bold uppercase text-white/45">{player.nationality ?? '-'}</p>
-            </div>
-            <PlayerRatingBadge rating={player.overall_rating} />
-          </div>
+          <p className="text-[10px] font-black uppercase text-yellow-300">
+            {positionLabel(player.position)}
+          </p>
+          <p
+            className="mt-1 text-[10px] font-black uppercase text-white"
+            style={{ overflowWrap: 'anywhere' }}
+          >
+            {team?.name ?? 'Takim'}
+          </p>
+          <p className="mt-1 text-[9px] font-bold uppercase text-white/45">
+            {player.nationality ?? '-'}
+          </p>
         </div>
+        <PlayerRatingBadge rating={player.overall_rating} />
       </div>
       <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[9px] font-black uppercase">
         <PlayerStat label="Hiz" value={stats.pace} />
@@ -3483,10 +3650,10 @@ function PremiumPlayerCard({
         <PlayerStat label="Def" value={stats.defense} />
         <PlayerStat label="Fiz" value={stats.physical} />
       </div>
-    </>
+    </div>
   );
 
-  const className = `w-full border-2 p-3 text-left shadow-[3px_3px_0px_0px_#000] transition ${
+  const className = `w-full border-2 p-4 text-left shadow-[3px_3px_0px_0px_#000] transition ${
     active
       ? 'border-yellow-400 bg-yellow-400/15'
       : selected
@@ -3496,10 +3663,17 @@ function PremiumPlayerCard({
           : 'border-white/15 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(24,24,27,0.92)_42%,rgba(0,0,0,0.96))] hover:border-yellow-400/70'
   }`;
 
-  if (!onClick) return <div className={className}>{content}</div>;
+  if (!onClick) return <div className={className} title={player.name}>{content}</div>;
 
   return (
-    <button type="button" onClick={onClick} disabled={disabled || selected} className={`${className} disabled:cursor-not-allowed`}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || selected}
+      className={`${className} disabled:cursor-not-allowed`}
+      title={player.name}
+      aria-label={player.name}
+    >
       {content}
     </button>
   );
@@ -3510,6 +3684,24 @@ function PlayerStat({ label, value }: { label: string; value: number }) {
     <span className="border border-white/10 bg-black/45 px-1 py-1 text-white/80">
       <span className="block text-white/35">{label}</span>
       {value}
+    </span>
+  );
+}
+
+function PlayerNameText({
+  text,
+  className = '',
+}: {
+  text: string;
+  className?: string;
+}) {
+  return (
+    <span
+      title={text}
+      className={`block min-w-0 w-full whitespace-normal break-words leading-tight ${className}`}
+      style={{ overflowWrap: 'anywhere' }}
+    >
+      {text}
     </span>
   );
 }
@@ -3797,7 +3989,7 @@ function PitchSlotButton({
   const compatible = pendingPlayer ? isPositionCompatible(pendingPlayer, slot.allowedPosition) : true;
   const isSelected = Boolean(player && selectedPlayerId === player.id);
   return (
-    <div className="relative flex h-12 w-12 items-center justify-center text-center transition-all sm:h-18 sm:w-18">
+    <div className="relative flex h-12 w-12 items-center justify-center text-center transition-all sm:h-18 sm:w-18" title={player?.name ?? positionLabel(slot.allowedPosition)}>
       {player ? (
         <div
           role="button"
@@ -3836,8 +4028,11 @@ function PitchSlotButton({
             </button>
           </div>
           <div className="text-base font-black text-white sm:text-xl">{player.jersey_number}</div>
-          <div className="absolute -bottom-5 max-w-16 truncate border border-zinc-700 bg-black px-1 py-0.5 text-[7px] font-black uppercase text-white sm:-bottom-7 sm:max-w-28 sm:px-2 sm:text-[9px]">
-            {player.name}
+          <div className="absolute -bottom-8 left-1/2 w-28 -translate-x-1/2 border border-zinc-700 bg-black px-1.5 py-1 text-center text-[7px] font-black uppercase text-white sm:-bottom-10 sm:w-36 sm:px-2 sm:text-[8px]">
+            <PlayerNameText
+              text={player.name}
+              className="text-[7px] uppercase sm:text-[8px]"
+            />
           </div>
           <div className="card-rating-badge absolute -right-3 top-5 flex h-6 w-6 items-center justify-center border border-black text-[10px] font-black shadow-[1px_1px_0px_0px_#000]">
             {player.overall_rating}
@@ -3911,7 +4106,11 @@ function BenchSlotGrid({
                   className={`game-button w-full text-left text-[9px] font-black uppercase ${selectedPlayerId === player.id ? 'text-yellow-300' : 'text-white'}`}
                 >
                   <div className="flex items-start justify-between gap-1">
-                    <span className="min-w-0 truncate text-white">{player.name}</span>
+                    <span className="min-w-0 flex-1 text-white">
+                      <span className="block whitespace-normal break-words leading-tight" style={{ overflowWrap: 'anywhere' }} title={player.name}>
+                        {player.name}
+                      </span>
+                    </span>
                     <button
                       type="button"
                       onClick={(event) => {
@@ -3969,8 +4168,12 @@ function DraftRosterList({
         {ids.map((id) => {
           const player = playerById.get(id);
           return (
-            <div key={id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border border-white/10 bg-black/25 p-2 text-[10px] font-black uppercase">
-              <span className="min-w-0 truncate">{player ? `#${player.jersey_number} ${player.name}` : id}</span>
+            <div key={id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-2 border border-white/10 bg-black/25 p-2 text-[10px] font-black uppercase">
+              <span className="min-w-0">
+                <span className="block whitespace-normal break-words text-white leading-tight" style={{ overflowWrap: 'anywhere' }} title={player ? `#${player.jersey_number} ${player.name}` : id}>
+                  {player ? `#${player.jersey_number} ${player.name}` : id}
+                </span>
+              </span>
               <button
                 type="button"
                 onClick={() => onCaptain(id)}
@@ -4010,12 +4213,16 @@ function PlayerDraftRow({
   onAdd: (playerId: string, target: RosterTarget) => void;
 }) {
   return (
-    <div className={`border border-white/10 bg-black/25 p-2 text-[10px] font-black uppercase ${selected ? 'opacity-35' : ''}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate">#{player.jersey_number} {player.name}</span>
+    <div className={`border border-white/10 bg-black/25 p-2 text-[10px] font-black uppercase ${selected ? 'opacity-35' : ''}`} title={player.name}>
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 flex-1">
+          <span className="block whitespace-normal break-words text-white leading-tight" style={{ overflowWrap: 'anywhere' }} title={`#${player.jersey_number} ${player.name}`}>
+            #{player.jersey_number} {player.name}
+          </span>
+        </span>
         <span className="shrink-0 border border-white/20 px-2 py-1">{player.overall_rating}</span>
       </div>
-      <p className="mt-1 truncate text-[9px] text-white/45">{player.position} / {player.nationality ?? '-'}</p>
+      <p className="mt-1 text-[9px] text-white/45">{player.position} / {player.nationality ?? '-'}</p>
       <div className="mt-2 grid grid-cols-3 gap-1">
         {(Object.keys(rosterTargetLabels) as RosterTarget[]).map((target) => (
           <button

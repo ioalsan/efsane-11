@@ -71,7 +71,7 @@ function MatchEnginePanelComponent({
         onSkip={handleSkipped}
         onDismissSkipped={handleDismissSkipped}
         simulationMode="manager"
-        initialAutoContinue={autoContinue}
+        autoContinue={autoContinue}
         initialSpeed={speed}
         onAutoContinueChange={onAutoContinueChange}
         onSpeedChange={onSpeedChange}

@@ -14,12 +14,17 @@ interface StorageWriter {
   setItem: (key: string, value: string) => void;
 }
 
+export interface MultiplayerMatchPreferenceSnapshot {
+  key: string;
+  preferences: MultiplayerMatchPreferences;
+}
+
 const AUTO_CONTINUE_PREFIX = 'canli11:autoContinue';
 const MATCH_SPEED_PREFIX = 'canli11:matchSpeed';
 const AUTO_SEASON_PREFIX = 'canli11:autoSeason';
 
 export const defaultMultiplayerMatchPreferences: MultiplayerMatchPreferences = {
-  autoContinue: false,
+  autoContinue: true,
   autoSeason: false,
   speed: 'fast',
 };
@@ -41,8 +46,9 @@ export const readMultiplayerMatchPreferences = (
 ): MultiplayerMatchPreferences => {
   const keys = getMultiplayerMatchPreferenceKeys(leagueId, userId);
   const speed = storage.getItem(keys.speed);
+  const storedAutoContinue = storage.getItem(keys.autoContinue);
   return {
-    autoContinue: storage.getItem(keys.autoContinue) === 'true',
+    autoContinue: storedAutoContinue === 'false' ? false : true,
     autoSeason: storage.getItem(keys.autoSeason) === 'true',
     speed: isSimulationSpeed(speed) ? speed : defaultMultiplayerMatchPreferences.speed,
   };
@@ -73,4 +79,19 @@ export const writeMultiplayerMatchSpeed = (
   value: SimulationSpeed,
 ) => {
   storage.setItem(getMultiplayerMatchPreferenceKeys(leagueId, userId).speed, value);
+};
+
+export const getNextMultiplayerMatchPreferences = (
+  storage: StorageReader,
+  currentKey: string | null,
+  leagueId: string | null | undefined,
+  userId: string | null | undefined,
+): MultiplayerMatchPreferenceSnapshot | null => {
+  if (!leagueId || !userId) return null;
+  const nextKey = `${leagueId}:${userId}`;
+  if (currentKey === nextKey) return null;
+  return {
+    key: nextKey,
+    preferences: readMultiplayerMatchPreferences(storage, leagueId, userId),
+  };
 };
