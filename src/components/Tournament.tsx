@@ -487,7 +487,14 @@ export default function Tournament({ userRating }: { userRating: number }) {
   const latestHome = latestFixture ? teamName(latestFixture.homeTeamId) : '';
   const latestAway = latestFixture ? teamName(latestFixture.awayTeamId) : '';
   const primaryActionLabel = latestResult ? 'Sonraki Maç' : `${currentStageLabel} Oyna`;
-  const showMobileActionBar = !liveFixture && (hasPlayableStage || Boolean(finishedMessage));
+  const actionStageLabel = competition.format === 'league' && inOpeningStage
+    ? `${Math.min(currentRoundIndex + 1, openingRounds.length)} / ${openingRounds.length}`
+    : currentStageLabel;
+  const actionStagePrefix = competition.format === 'league' && inOpeningStage ? 'Hafta' : 'Etap';
+  const activeFixture = currentFixtures.find(
+    (fixture) => fixture.homeTeamId === USER_TEAM_ID || fixture.awayTeamId === USER_TEAM_ID,
+  ) ?? currentFixtures[0] ?? null;
+  const showMobileActionBar = !liveFixture && Boolean(finishedMessage);
   const showStandingsPanel = competition.format === 'league' || inOpeningStage || standings.some((row) => row.played > 0);
   const visiblePlayedMatches = playedMatches.filter(({ fixture }) => {
     if (competition.format !== 'world_cup_48') return true;
@@ -549,6 +556,37 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </div>
       </header>
 
+      {!liveFixture && hasPlayableStage && (
+        <section className="mt-4 border-4 border-black bg-green-600 p-4 text-white shadow-[5px_5px_0px_0px_#000] md:hidden">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
+            Sezon aksiyonu
+          </p>
+          <h3 className="mt-1 text-xl font-black uppercase italic tracking-tighter">
+            {currentStageLabel}
+          </h3>
+          <div className="mt-3 grid gap-2 text-[10px] font-black uppercase">
+            <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+              {actionStagePrefix}: {actionStageLabel}
+            </span>
+            <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+              Aktif maç: {activeFixture ? `${teamName(activeFixture.homeTeamId)} vs ${teamName(activeFixture.awayTeamId)}` : '-'}
+            </span>
+            <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+              Durum: Maç başlamaya hazır
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={startCurrentStageSimulation}
+            disabled={!hasPlayableStage}
+            className="game-button mt-3 flex w-full items-center justify-center gap-2 border-4 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase italic text-black shadow-[4px_4px_0px_0px_#000] disabled:opacity-50"
+          >
+            <Play size={20} fill="currentColor" />
+            {primaryActionLabel}
+          </button>
+        </section>
+      )}
+
       <section className={`mt-5 grid gap-3 border-2 border-black p-4 shadow-[4px_4px_0px_0px_#000] lg:grid-cols-[1.1fr_1fr_1fr] ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
         <ManagerGauge label="Kadro Gücü" value={managerSummary.power} tone="yellow" />
         <ManagerGauge label={`Takım Kimyası / ${managerSummary.chemistryLabel}`} value={managerSummary.chemistry} tone="green" />
@@ -581,18 +619,37 @@ export default function Tournament({ userRating }: { userRating: number }) {
       </section>
 
       {!liveFixture && hasPlayableStage && (
-        <section className="sticky top-2 z-30 mt-4 border-2 border-black bg-green-600 p-3 text-white shadow-[5px_5px_0px_0px_#000] md:hidden">
-          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/75">
-            6/7 Maç simülasyonunu izle
-          </p>
-          <button
-            type="button"
-            onClick={startCurrentStageSimulation}
-            className="game-button flex w-full items-center justify-center gap-2 border-2 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
-          >
-            <Play size={18} fill="currentColor" />
-            {primaryActionLabel}
-          </button>
+        <section className="mt-5 hidden border-4 border-black bg-green-600 p-4 text-white shadow-[6px_6px_0px_0px_#000] md:block">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
+                Sezon aksiyonu
+              </p>
+              <h3 className="mt-1 text-2xl font-black uppercase italic tracking-tighter">
+                {currentStageLabel}
+              </h3>
+              <div className="mt-3 grid gap-2 text-[11px] font-black uppercase sm:grid-cols-3">
+                <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+                  {actionStagePrefix}: {actionStageLabel}
+                </span>
+                <span className="min-w-0 border-2 border-white/25 bg-black/20 px-3 py-2">
+                  Aktif maç: {activeFixture ? `${teamName(activeFixture.homeTeamId)} vs ${teamName(activeFixture.awayTeamId)}` : '-'}
+                </span>
+                <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+                  Durum: Maç başlamaya hazır
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={startCurrentStageSimulation}
+              disabled={!hasPlayableStage}
+              className="game-button flex w-full items-center justify-center gap-3 border-4 border-black bg-yellow-400 px-6 py-5 text-base font-black uppercase italic text-black shadow-[5px_5px_0px_0px_#000] disabled:opacity-50 lg:w-auto lg:min-w-72"
+            >
+              <Play size={24} fill="currentColor" />
+              {primaryActionLabel}
+            </button>
+          </div>
         </section>
       )}
 
@@ -676,18 +733,6 @@ export default function Tournament({ userRating }: { userRating: number }) {
               );
             })}
           </div>
-
-          {!finishedMessage && (
-            <button
-              type="button"
-              onClick={startCurrentStageSimulation}
-              disabled={!hasPlayableStage}
-              className="game-button game-button-major mt-6 hidden w-full items-center justify-center gap-3 border-4 border-black bg-green-600 px-6 py-6 text-2xl font-black uppercase italic text-white shadow-[8px_8px_0px_0px_#000] disabled:opacity-50 md:flex"
-            >
-              <Play size={28} fill="currentColor" />
-              {isSimulating ? 'Maç Canlı...' : primaryActionLabel}
-            </button>
-          )}
         </section>
 
         <aside className="space-y-6">
