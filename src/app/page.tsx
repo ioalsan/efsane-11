@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Pitch from '@/components/Pitch';
 import PlayerList from '@/components/PlayerList';
@@ -9,15 +9,14 @@ import ManagerLeague from '@/components/ManagerLeague';
 import CareerMode from '@/components/CareerMode';
 import MultiplayerLeague from '@/components/MultiplayerLeague';
 import SquadPanel from '@/components/SquadPanel';
-import ShareExportPanel from '@/components/ShareExportPanel';
 import AdSlot from '@/components/AdSlot';
+import GameShell from '@/components/GameShell';
 import { useTeamStore, MentalityType } from '@/store/useTeamStore';
-import { Sun, Moon, Shield, Flame, Activity, Settings2, Trophy, PencilLine, Database, Medal, Users } from 'lucide-react';
+import { Sun, Moon, Settings2, Trophy, Database, Medal, Users } from 'lucide-react';
 import { FORMATIONS, FormationType } from '@/lib/formations';
 import { decodeShareCode } from '@/lib/shareCode';
 import { saveTeamSnapshot } from '@/lib/localStats';
 import { getCompetitions } from '@/lib/seasonRepository';
-import { getTacticProfile } from '@/lib/teamManagement';
 import { loadCareer, getManagerLevel, type CareerSave } from '@/lib/careerMode';
 import { loadProfile, type ProfileStats } from '@/lib/profileService';
 
@@ -61,6 +60,17 @@ export default function Home() {
     setMultiplayerFocus(focus);
     setGameMode('multiplayer');
   };
+
+  useEffect(() => {
+    if (gameMode === 'multiplayer' || (gameMode === 'quick' && appPhase === 'draft')) {
+      document.body.dataset.gameShell = gameMode;
+    } else {
+      delete document.body.dataset.gameShell;
+    }
+    return () => {
+      delete document.body.dataset.gameShell;
+    };
+  }, [appPhase, gameMode]);
 
   const handleFormationSelect = (nextFormation: FormationType) => {
     setPendingFormation(nextFormation);
@@ -244,8 +254,8 @@ export default function Home() {
 
   if (gameMode === 'multiplayer') {
     return (
-      <main className={`min-h-screen flex flex-col transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
-        <header className="flex min-w-0 flex-col gap-4 border-b-2 border-black bg-zinc-900 p-5 text-white sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <main className={`min-h-screen flex flex-col overflow-x-hidden transition-colors duration-300 font-mono xl:h-dvh xl:min-h-0 xl:overflow-hidden ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
+        <header className="sticky top-0 z-50 flex min-w-0 shrink-0 flex-col gap-4 border-b-2 border-black bg-zinc-900 p-4 text-white sm:flex-row sm:flex-wrap sm:items-center sm:justify-between xl:static">
           <div className="flex min-w-0 items-center gap-3">
             <Users size={24} className="text-green-400" />
             <div>
@@ -277,7 +287,7 @@ export default function Home() {
             </button>
           </div>
         </header>
-        <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-10">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 xl:overflow-hidden xl:p-4">
           <MultiplayerLeague onBackToQuick={() => setGameMode('quick')} focusMode={multiplayerFocus} />
         </div>
         <AdSlot placement="mobile-sticky" />
@@ -287,20 +297,23 @@ export default function Home() {
 
   if (appPhase === 'tournament') {
     return (
-      <main className={`min-h-screen flex flex-col transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
-        <header className="p-5 flex justify-between items-center border-b-2 border-black bg-zinc-900 text-white">
-           <div className="flex items-center gap-3">
-              <Trophy size={24} className="text-yellow-500" />
-              <h1 className="text-2xl font-black italic tracking-tighter uppercase">TURNUVA MODU</h1>
-           </div>
-           <div className="flex flex-wrap items-center justify-end gap-2">
+      <main className={`min-h-screen overflow-x-hidden transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
+        <header className={`sticky top-0 z-50 flex shrink-0 flex-col gap-3 border-b-2 border-black p-4 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between xl:static ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
+          <div className="flex min-w-0 items-center gap-3">
+            <Trophy size={24} className="shrink-0 text-yellow-500" />
+            <div className="min-w-0">
+              <h1 className="text-3xl font-black italic leading-none tracking-tighter">CANLI11</h1>
+              <p className="mt-1 text-[10px] font-black uppercase tracking-[0.2em] opacity-50">Turnuva Modu</p>
+            </div>
+          </div>
+          <nav className="grid min-w-0 grid-cols-3 gap-2" aria-label="Oyun modu">
             <button
               type="button"
               onClick={() => {
                 setAppPhase('draft');
                 setGameMode('quick');
               }}
-              className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
+              className="game-button border-2 border-black bg-yellow-400 px-3 py-2 text-[10px] font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
             >
               Hızlı Oyna
             </button>
@@ -310,7 +323,7 @@ export default function Home() {
                 setAppPhase('draft');
                 openMultiplayer('friends');
               }}
-              className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
+              className="game-button border-2 border-black bg-white px-3 py-2 text-[10px] font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
             >
               Arkadaş Ligi
             </button>
@@ -320,61 +333,50 @@ export default function Home() {
                 setAppPhase('draft');
                 openMultiplayer('invite');
               }}
-              className="game-button border border-white/20 px-3 py-3 text-[10px] font-black uppercase hover:bg-white/10"
+              className="game-button border-2 border-black bg-white px-3 py-2 text-[10px] font-black uppercase text-black shadow-[3px_3px_0px_0px_#000]"
             >
               Davetli Lig
             </button>
-            <button onClick={toggleTheme} className="game-button p-3 border border-white/20 hover:bg-white/10 transition-colors rounded-none">
-              {isDark ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-           </div>
+          </nav>
         </header>
-        <div className="flex-1 p-4 lg:p-10 overflow-y-auto">
+        <div className="w-full min-w-0 p-3">
           <Tournament userRating={teamRating} />
         </div>
-        <AdSlot placement="mobile-sticky" />
       </main>
     );
   }
 
   return (
-    <main className={`min-h-screen flex flex-col transition-colors duration-300 font-mono ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
+    <main className={`min-h-screen flex flex-col overflow-x-hidden transition-colors duration-300 font-mono xl:h-dvh xl:min-h-0 xl:overflow-hidden ${isDark ? 'bg-zinc-950 text-white' : 'bg-zinc-100 text-black'}`}>
       
       {/* HEADER */}
-      <header className={`p-5 sm:p-6 flex justify-between items-center border-b-2 border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
-        <div className="flex flex-col">
+      <header className={`sticky top-0 z-50 flex shrink-0 flex-col gap-3 border-b-2 border-black p-4 transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between xl:static ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}>
+        <div className="flex min-w-0 flex-col">
            <h1 className="text-4xl font-black italic tracking-tighter leading-none">CANLI11</h1>
            <div className="text-xs uppercase font-bold tracking-[0.2em] opacity-40 mt-1">Kadro Kur • Simüle Et • Paylaş</div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="grid min-w-0 grid-cols-[1fr_1fr_1fr_auto] gap-2">
           <button
             type="button"
             onClick={() => setGameMode('quick')}
-            className="game-button hidden border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:hidden"
+            className="game-button border-2 border-black bg-yellow-400 px-3 py-2 text-[10px] font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:px-4 sm:py-3 sm:text-xs"
           >
             Hızlı Oyna
           </button>
           <button
             type="button"
-            onClick={() => setGameMode('manager')}
-            className={`hidden game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+            onClick={() => openMultiplayer('friends')}
+            className="game-button border-2 border-black bg-white px-3 py-2 text-[10px] font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:px-4 sm:py-3 sm:text-xs"
           >
-            Menajer Ligi
+            Arkadaş
           </button>
           <button
             type="button"
-            onClick={() => setGameMode('career')}
-            className={`hidden game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
+            onClick={() => openMultiplayer('invite')}
+            className="game-button border-2 border-black bg-white px-3 py-2 text-[10px] font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:px-4 sm:py-3 sm:text-xs"
           >
-            Kariyer Modu
-          </button>
-          <button
-            type="button"
-            onClick={() => setGameMode('multiplayer')}
-            className={`hidden game-button border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-white text-black'}`}
-          >
-            Multiplayer Lig
+            Davetli
           </button>
           <Link
             href="/admin"
@@ -384,45 +386,11 @@ export default function Home() {
           >
             <Database size={22} />
           </Link>
-          <button onClick={toggleTheme} className={`game-button p-3 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-yellow-400 text-black'}`}>
+          <button onClick={toggleTheme} className={`game-button border-2 border-black p-2 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none sm:p-3 ${isDark ? 'bg-zinc-800 text-yellow-500' : 'bg-yellow-400 text-black'}`}>
             {isDark ? <Sun size={24} /> : <Moon size={24} />}
           </button>
         </div>
       </header>
-
-      <section className={`border-b-4 border-black px-4 py-5 ${isDark ? 'bg-zinc-950 text-white' : 'bg-yellow-50 text-black'}`}>
-        <div className="mx-auto grid max-w-7xl gap-3 md:grid-cols-3">
-          <ModeCard
-            title="Arkadaş Ligi"
-            eyebrow="Canlı11'in önerilen modu"
-            description="Aynı cihazda arkadaşlarınla 18 takımlı sezon kur."
-            icon={<Users size={24} />}
-            highlighted
-            action="Arkadaş Ligi Aç"
-            meta={isTeamFull && hasCaptain ? 'Hızlı Oyna kadron aktarılabilir' : '2-18 oyuncu'}
-            onClick={() => openMultiplayer('friends')}
-          />
-          <ModeCard
-            title="Davetli Lig"
-            eyebrow="Kodla katılım"
-            description="Davet koduyla asenkron lig odası oluştur veya katıl."
-            icon={<Shield size={24} />}
-            action="Davetli Lig Aç"
-            meta="LocalStorage MVP"
-            onClick={() => openMultiplayer('invite')}
-          />
-          <ModeCard
-            title="Hızlı Oyna"
-            eyebrow="Solo draft"
-            description="Kadro kur, 2D simülasyonu izle ve takımını paylaş."
-            icon={<Activity size={24} />}
-            active
-            action={isTeamFull && hasCaptain ? 'Kadro Hazır' : 'Kadro Kur'}
-            meta={`${selectedCount}/11`}
-            onClick={() => setGameMode('quick')}
-          />
-        </div>
-      </section>
 
       {showLegacyCareerEntry && careerResume && (
         <section className={`border-b-4 border-black px-4 py-4 ${isDark ? 'bg-yellow-400 text-black' : 'bg-yellow-300 text-black'}`}>
@@ -450,237 +418,97 @@ export default function Home() {
         </section>
       )}
 
-      <section className={`sticky top-0 z-40 border-b-2 border-black px-4 py-3 font-mono shadow-[0_4px_0px_0px_rgba(0,0,0,0.25)] lg:static lg:shadow-none ${isDark ? 'bg-zinc-950 text-white' : 'bg-yellow-50 text-black'}`}>
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-yellow-500">Sıradaki adım</p>
-            <p className="mt-1 text-xs font-black uppercase sm:text-sm">{flowMessage}</p>
-            {isTeamFull && !hasCaptain && (
-              <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-red-500">
-                Devam etmek için kaptan seçmelisin.
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            {setupComplete && isTeamFull && !hasCaptain && bestCaptain && (
-              <button
-                type="button"
-                onClick={() => setCaptain(bestCaptain.id)}
-                className="game-button border-2 border-black bg-yellow-400 px-4 py-3 text-xs font-black uppercase text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
-              >
-                En yüksek ratingli oyuncuyu kaptan yap
-              </button>
-            )}
-            {canStartTournament && (
-              <button
-                type="button"
-                onClick={() => setAppPhase('tournament')}
-                className="game-button border-2 border-black bg-green-600 px-4 py-3 text-xs font-black uppercase text-white shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
-              >
-                Turnuvayı Başlat
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          
-           {!setupComplete ? (
-           <div className={`w-full lg:w-80 p-8 border-r-2 border-black flex flex-col gap-6 overflow-y-auto transition-colors duration-300 ${isDark ? 'bg-zinc-900/80' : 'bg-zinc-50'}`}>
-              <div>
-                 <div className="flex items-center gap-2 mb-4 opacity-60">
-                    <Medal size={18} />
-                    <h3 className="text-sm font-black uppercase tracking-[0.2em] italic text-yellow-500">TURNUVA</h3>
-                 </div>
-                 <div className="grid gap-2">
-                   {competitions.map((competition) => (
-                     <button
-                       key={competition.competitionId}
-                       type="button"
-                       onClick={() => setPendingCompetitionId(competition.competitionId)}
-                       className={`game-button border-2 border-black px-4 py-3 text-left transition-all ${
-                         pendingCompetitionId === competition.competitionId
-                           ? 'game-button-selected bg-yellow-500 text-black'
-                           : 'bg-white text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:bg-zinc-100'
-                       }`}
-                     >
-                       <span className="block text-xs font-black uppercase">{competition.competitionName}</span>
-                       <span className="mt-1 block text-[9px] font-black uppercase tracking-[0.16em] opacity-55">
-                         {competition.season} / {competition.teams.length} takim
-                       </span>
-                     </button>
-                   ))}
-                 </div>
-              </div>
-
-              <div>
-                 <div className="flex items-center gap-2 mb-4 opacity-60">
-                    <PencilLine size={18} />
-                    <h3 className="text-sm font-black uppercase tracking-[0.2em] italic text-yellow-500">KADRO ADI</h3>
-                 </div>
-                 <input
-                   value={squadName}
-                   onChange={(event) => setSquadName(event.target.value)}
-                   maxLength={32}
-                   className={`w-full border-2 border-black px-4 py-4 text-sm font-black uppercase outline-none shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}
-                   placeholder="Efsane 11"
-                 />
-              </div>
-
-              <div>
-                 <div className="flex items-center gap-2 mb-5 opacity-60">
-                    <Settings2 size={18} />
-                    <h3 className="text-sm font-black uppercase tracking-[0.2em] italic text-yellow-500">DİZİLİŞ</h3>
-                 </div>
-                 <div className="grid grid-cols-2 gap-2">
-                    {FORMATIONS.map(f => (
-                      <button key={f.id} onClick={() => handleFormationSelect(f.id)} 
-                        className={`game-button p-3 text-xs font-black border-2 border-black transition-all ${pendingFormation === f.id ? 'game-button-selected bg-black text-white' : 'bg-white text-black hover:bg-zinc-100 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:shadow-none'}`}>
-                        {f.id}
-                      </button>
-                    ))}
+      <div className="min-h-0 min-w-0 flex-1 p-3 xl:overflow-hidden">
+        <GameShell
+          leftLabel={setupComplete ? 'Oyuncular' : 'Kurulum'}
+          centerLabel="Saha"
+          rightLabel="Kadro"
+          initialPanel={setupComplete ? 'left' : 'center'}
+          topActionBar={(
+            <section className={`border-4 border-black px-4 py-3 shadow-[4px_4px_0px_0px_#000] ${isDark ? 'bg-zinc-950 text-white' : 'bg-yellow-50 text-black'}`}>
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-500">Sıradaki adım</p>
+                  <p className="mt-1 text-xs font-black uppercase">{flowMessage}</p>
+                  <p className="mt-1 text-[9px] font-black uppercase opacity-55">
+                    İlk 11: {selectedCount}/11 | Güç: {teamRating || '-'} | Kaptan: {hasCaptain ? 'Seçildi' : 'Yok'}
+                  </p>
+                  <p className="mt-1 text-[9px] font-black uppercase opacity-55">
+                    Yedek: 0/7 | Hızlı Oyna ana hedefi: ilk 11 + kaptan
+                  </p>
                 </div>
-             </div>
-
-             <div>
-                 <div className="flex items-center gap-2 mb-5 opacity-60">
-                    <Activity size={18} />
-                    <h3 className="text-sm font-black uppercase tracking-[0.2em] italic text-yellow-500">ZİHNİYET</h3>
-                 </div>
-                 <div className="flex flex-col gap-2">
-                    {(['Gegenpress', 'Balanced', 'ParkTheBus'] as MentalityType[]).map((m) => {
-                      const tactic = getTacticProfile(m);
-                      return (
-                        <button key={m} onClick={() => handleMentalitySelect(m)}
-                          className={`game-button border-2 border-black px-5 py-3 text-left text-xs font-black transition-all ${pendingMentality === m ? 'game-button-selected bg-black text-white' : 'bg-white text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:bg-zinc-100 active:shadow-none'}`}>
-                          <span className="flex items-center gap-2">
-                            {m === 'Gegenpress' ? 'HÜCUM' : m === 'ParkTheBus' ? 'SAVUNMA' : 'DENGELİ'}
-                            {m === 'Gegenpress' && <Flame size={12} className="text-red-500" />}
-                            {m === 'ParkTheBus' && <Shield size={12} className="text-blue-500" />}
-                          </span>
-                          <span className="mt-1 block text-[9px] font-bold uppercase tracking-[0.12em] opacity-55">
-                            {tactic.description}
-                          </span>
-                          <span className="mt-1 block text-[9px] font-black uppercase tracking-[0.12em] text-yellow-500">
-                            {tactic.riskLabel}
-                          </span>
-                        </button>
-                      );
-                    })}
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {setupComplete && isTeamFull && !hasCaptain && bestCaptain && (
+                    <button type="button" onClick={() => setCaptain(bestCaptain.id)} className="game-button border-2 border-black bg-yellow-400 px-3 py-2 text-[10px] font-black uppercase text-black">
+                      Kaptanı Otomatik Seç
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => canStartTournament && setAppPhase('tournament')}
+                    disabled={!canStartTournament}
+                    className="game-button border-2 border-black bg-green-600 px-4 py-3 text-xs font-black uppercase text-white disabled:opacity-35"
+                  >
+                    {canStartTournament ? 'Turnuvaya Geç' : `Takımı Tamamla ${selectedCount}/11`}
+                  </button>
                 </div>
-             </div>
-
-             <div>
-                <div className="flex items-center gap-2 mb-5 opacity-60">
-                    <Shield size={18} />
-                    <h3 className="text-sm font-black uppercase tracking-[0.2em] italic text-yellow-500">ZORLUK</h3>
-                 </div>
-                 <button onClick={() => setPendingBlindMode(!pendingBlindMode)} 
-                   className={`game-button w-full p-4 text-xs font-black border-2 border-black transition-all ${pendingBlindMode ? 'game-button-selected bg-purple-700 text-white' : 'bg-white text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:bg-zinc-100'}`}>
-                   {pendingBlindMode ? 'GİZLİLİK MODU (??)' : 'KLASİK MOD (REYTING)'}
-                 </button>
               </div>
-
-              <div className="mt-auto pt-8 border-t border-black/10 space-y-4">
-                 <button
-                   onClick={handleSetupStart}
-                   disabled={!pendingFormation || !pendingMentality}
-                   className={`game-button game-button-major w-full py-5 border-4 border-black font-black text-2xl italic tracking-tighter transition-all ${
-                     pendingFormation && pendingMentality
-                       ? 'bg-yellow-500 text-black shadow-[7px_7px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none'
-                       : 'bg-zinc-300 text-zinc-500 cursor-not-allowed opacity-60'
-                   }`}
-                 >
-                   KADRO SEÇİMİNE GEÇ
-                 </button>
-                 <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-45 leading-relaxed">
-                   Diziliş, zihniyet ve zorluk hazırsa draft panelini aç.
-                 </p>
-                 <AdSlot placement="left-panel" className="hidden lg:block" />
+            </section>
+          )}
+          leftPanel={!setupComplete ? (
+            <section className={`h-full space-y-5 border-4 border-black p-4 ${isDark ? 'bg-zinc-900 text-white' : 'bg-zinc-50 text-black'}`}>
+              <div>
+                <div className="mb-3 flex items-center gap-2"><Medal size={16} className="text-yellow-500" /><h3 className="text-xs font-black uppercase">Turnuva</h3></div>
+                <div className="grid gap-2">
+                  {competitions.map((competition) => (
+                    <button key={competition.competitionId} type="button" onClick={() => setPendingCompetitionId(competition.competitionId)} className={`game-button border-2 border-black px-3 py-2 text-left text-[10px] font-black uppercase ${pendingCompetitionId === competition.competitionId ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}>
+                      {competition.competitionName} <span className="block text-[8px] opacity-55">{competition.teams.length} takım</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-           </div>
-           ) : (
-             <div ref={captainPanelRef} className="w-full lg:h-full lg:w-auto">
-               <PlayerList side="left" />
-             </div>
-           )}
-           
-          {/* CENTER: PITCH */}
-          <div className="flex-1 p-4 lg:p-12 flex flex-col items-center justify-center overflow-y-auto bg-black/5">
-            <div className="w-full max-w-[728px] relative">
-              <AdSlot placement="pitch-top" className="mb-6 hidden md:block" />
-              <button 
-                onClick={() => canStartTournament && setAppPhase('tournament')}
-                disabled={!canStartTournament}
-                className={`game-button game-button-major mb-6 w-full py-6 font-black text-3xl italic tracking-tighter transition-all border-4 border-black sm:text-4xl
-                  ${!canStartTournament
-                    ? 'bg-zinc-300 text-zinc-500 cursor-not-allowed opacity-50' 
-                    : 'bg-green-600 text-white shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-0 active:translate-y-0'}
-                `}
-              >
-                {!isTeamFull ? `KADROYU TAMAMLA (${selectedCount}/11)` : !hasCaptain ? 'KAPTAN SEÇ' : 'TURNUVAYI BAŞLAT ⚔️'}
-              </button>
-              <Pitch previewFormationId={setupComplete ? null : pendingFormation} />
-              {setupComplete && <ShareExportPanel isTeamFull={isTeamFull} hasCaptain={hasCaptain} />}
-            </div>
-          </div>
-
-           {setupComplete && <SquadPanel />}
-
+              <label className="block text-[10px] font-black uppercase">Kadro Adı
+                <input value={squadName} onChange={(event) => setSquadName(event.target.value)} maxLength={32} className="mt-2 w-full border-2 border-black bg-white px-3 py-3 text-xs font-black uppercase text-black" placeholder="Efsane 11" />
+              </label>
+              <div>
+                <p className="mb-2 text-[10px] font-black uppercase">Diziliş</p>
+                <div className="grid grid-cols-2 gap-2">{FORMATIONS.map((formation) => <button key={formation.id} type="button" onClick={() => handleFormationSelect(formation.id)} className={`game-button border-2 border-black px-2 py-2 text-[10px] font-black ${pendingFormation === formation.id ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}>{formation.id}</button>)}</div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(['Gegenpress', 'Balanced', 'ParkTheBus'] as MentalityType[]).map((item) => <button key={item} type="button" onClick={() => handleMentalitySelect(item)} className={`game-button border-2 border-black px-2 py-2 text-[9px] font-black uppercase ${pendingMentality === item ? 'bg-yellow-400 text-black' : 'bg-white text-black'}`}>{item === 'Gegenpress' ? 'Hücum' : item === 'ParkTheBus' ? 'Savunma' : 'Dengeli'}</button>)}
+              </div>
+              <button type="button" onClick={() => setPendingBlindMode(!pendingBlindMode)} className="game-button w-full border-2 border-black bg-zinc-800 px-3 py-3 text-[10px] font-black uppercase text-white">{pendingBlindMode ? 'Gizlilik Modu' : 'Klasik Mod'}</button>
+              <button type="button" onClick={handleSetupStart} disabled={!pendingFormation || !pendingMentality} className="game-button w-full border-4 border-black bg-yellow-400 px-4 py-4 text-sm font-black uppercase text-black disabled:opacity-35">Kadro Seçimine Geç</button>
+            </section>
+          ) : (
+            <div ref={captainPanelRef} className="h-full min-h-0 w-full"><PlayerList side="left" /></div>
+          )}
+          centerPanel={(
+            <section className="flex min-h-full min-w-0 flex-col items-center bg-black/5 p-2 sm:p-3">
+              <Pitch className="quick-shell-pitch" previewFormationId={setupComplete ? null : pendingFormation} />
+            </section>
+          )}
+          rightPanel={setupComplete ? <SquadPanel /> : (
+            <section className={`h-full overflow-y-auto border-4 border-black p-5 ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
+              <Settings2 className="text-yellow-500" />
+              <h2 className="mt-3 text-xl font-black uppercase italic">Hızlı Oyna Kurulumu</h2>
+              <p className="mt-3 text-xs font-black uppercase leading-relaxed opacity-60">Turnuva, diziliş ve zihniyet seç. Saha önizlemesi orta panelde sabit kalır.</p>
+              <div className="mt-5 grid gap-2 text-[10px] font-black uppercase">
+                <span className="border-2 border-black p-3">Turnuva: {competitions.find((item) => item.competitionId === pendingCompetitionId)?.competitionName ?? '-'}</span>
+                <span className="border-2 border-black p-3">Diziliş: {pendingFormation ?? '-'}</span>
+                <span className="border-2 border-black p-3">Zihniyet: {pendingMentality ?? '-'}</span>
+              </div>
+              <section className="mt-6 border-2 border-black bg-yellow-400 p-4 text-black">
+                <h2 className="text-sm font-black uppercase italic">Sıradaki Adım</h2>
+                <p className="mt-3 text-xs font-bold leading-relaxed">
+                  Önce turnuva, diziliş ve taktik seç. Sonra sol panelden takım çevirip oyuncu
+                  seç, orta sahadaki uygun slota yerleştir ve kaptanını belirle.
+                </p>
+              </section>
+            </section>
+          )}
+        />
       </div>
-      <AdSlot placement="mobile-sticky" />
     </main>
-  );
-}
-
-function ModeCard({
-  title,
-  eyebrow,
-  description,
-  icon,
-  action,
-  meta,
-  onClick,
-  highlighted = false,
-  active = false,
-}: {
-  title: string;
-  eyebrow: string;
-  description: string;
-  icon: ReactNode;
-  action: string;
-  meta: string;
-  onClick: () => void;
-  highlighted?: boolean;
-  active?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`game-button min-h-44 border-4 border-black p-5 text-left shadow-[6px_6px_0px_0px_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[3px_3px_0px_0px_#000] ${
-        highlighted
-          ? 'bg-yellow-400 text-black'
-          : active
-            ? 'bg-green-600 text-white'
-            : 'bg-white text-black'
-      }`}
-    >
-      <span className="flex items-start justify-between gap-4">
-        <span>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">{eyebrow}</span>
-          <span className="mt-2 block text-2xl font-black uppercase italic tracking-tight">{title}</span>
-        </span>
-        <span className={`grid h-12 w-12 shrink-0 place-items-center border-2 border-black ${highlighted ? 'bg-black text-yellow-400' : active ? 'bg-yellow-400 text-black' : 'bg-zinc-950 text-yellow-400'}`}>
-          {icon}
-        </span>
-      </span>
-      <span className="mt-4 block text-xs font-black uppercase leading-relaxed opacity-70">{description}</span>
-      <span className="mt-5 flex items-center justify-between gap-3 border-t-2 border-black/25 pt-4">
-        <span className="text-sm font-black uppercase">{action}</span>
-        <span className="border-2 border-black bg-black px-2 py-1 text-[10px] font-black uppercase text-white">{meta}</span>
-      </span>
-    </button>
   );
 }

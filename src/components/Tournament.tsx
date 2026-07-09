@@ -525,7 +525,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
   };
 
   return (
-    <div className={`flex h-full min-h-0 w-full flex-col overflow-y-auto overscroll-contain border-4 border-black p-3 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-4 xl:overflow-x-hidden xl:overflow-y-auto ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-4' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
+    <div className={`mx-auto w-full max-w-7xl overflow-visible border-4 border-black p-3 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-4 ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-4' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
       <AutoContinueRunner
         token={autoAdvanceToken}
         enabled={autoContinue}
