@@ -34,7 +34,6 @@ import {
   type SquadManagementSummary,
 } from '@/lib/teamManagement';
 import type { CompetitionGroup, KnockoutRound, SeasonCompetition, SeasonTeam } from '@/types';
-import AdSlot from './AdSlot';
 import LiveMatchPanel from './LiveMatchPanel';
 
 const USER_TEAM_ID = 'efsane-11-user';
@@ -526,16 +525,15 @@ export default function Tournament({ userRating }: { userRating: number }) {
   };
 
   return (
-    <div className={`mx-auto w-full max-w-7xl border-4 border-black p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-8 ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-8' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
+    <div className={`flex h-full min-h-0 w-full flex-col overflow-y-auto overscroll-contain border-4 border-black p-3 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-4 xl:overflow-x-hidden xl:overflow-y-auto ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-4' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
       <AutoContinueRunner
         token={autoAdvanceToken}
         enabled={autoContinue}
         canRun={hasPlayableStage}
         onRun={startCurrentStageSimulation}
       />
-      <AdSlot placement="result" className="mb-7 hidden md:block" />
-
-      <header className="flex flex-col gap-5 border-b-4 border-black pb-6 lg:flex-row lg:items-center lg:justify-between">
+      <header className="shrink-0 border-b-4 border-black pb-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-4">
           <div className="grid h-14 w-14 place-items-center border-2 border-black bg-yellow-500 text-black shadow-[4px_4px_0px_0px_#000]">
             <Trophy size={30} />
@@ -554,7 +552,20 @@ export default function Tournament({ userRating }: { userRating: number }) {
           <Stat label="Kaptan" value={managerSummary.captainImpact ? `+${managerSummary.captainImpact}` : '-'} />
           <Stat label="Format" value={formatLabel(competition)} />
         </div>
+        </div>
       </header>
+
+      {liveFixture?.result && (
+        <div ref={liveMatchRef} className="mt-4 shrink-0 scroll-mt-4 md:scroll-mt-8">
+          <LiveMatchPanel
+            fixture={liveFixture}
+            result={liveFixture.result}
+            homeName={teamName(liveFixture.homeTeamId)}
+            awayName={teamName(liveFixture.awayTeamId)}
+            onComplete={handleLiveComplete}
+          />
+        </div>
+      )}
 
       {!liveFixture && hasPlayableStage && (
         <section className="mt-4 border-4 border-black bg-green-600 p-4 text-white shadow-[5px_5px_0px_0px_#000] md:hidden">
@@ -587,7 +598,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </section>
       )}
 
-      <section className={`mt-5 grid gap-3 border-2 border-black p-4 shadow-[4px_4px_0px_0px_#000] lg:grid-cols-[1.1fr_1fr_1fr] ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+      <section className={`mt-4 grid shrink-0 gap-3 border-2 border-black p-3 shadow-[4px_4px_0px_0px_#000] lg:grid-cols-[1.1fr_1fr_1fr] ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
         <ManagerGauge label="Kadro Gücü" value={managerSummary.power} tone="yellow" />
         <ManagerGauge label={`Takım Kimyası / ${managerSummary.chemistryLabel}`} value={managerSummary.chemistry} tone="green" />
         <div className="border-2 border-black bg-black p-3 text-white">
@@ -598,7 +609,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </div>
       </section>
 
-      <section className={`mt-5 flex flex-col gap-3 border-2 border-black p-4 shadow-[4px_4px_0px_0px_#000] sm:flex-row sm:items-center sm:justify-between ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+      <section className={`mt-4 flex shrink-0 flex-col gap-3 border-2 border-black p-3 shadow-[4px_4px_0px_0px_#000] sm:flex-row sm:items-center sm:justify-between ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-yellow-500">Otomatik devam et</p>
           <p className="mt-1 text-[11px] font-bold opacity-60">
@@ -619,7 +630,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
       </section>
 
       {!liveFixture && hasPlayableStage && (
-        <section className="mt-5 hidden border-4 border-black bg-green-600 p-4 text-white shadow-[6px_6px_0px_0px_#000] md:block">
+        <section className="mt-4 hidden shrink-0 border-4 border-black bg-green-600 p-4 text-white shadow-[6px_6px_0px_0px_#000] md:block">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
@@ -651,18 +662,6 @@ export default function Tournament({ userRating }: { userRating: number }) {
             </button>
           </div>
         </section>
-      )}
-
-      {liveFixture?.result && (
-        <div ref={liveMatchRef} className="scroll-mt-4 md:scroll-mt-8">
-          <LiveMatchPanel
-            fixture={liveFixture}
-            result={liveFixture.result}
-            homeName={teamName(liveFixture.homeTeamId)}
-            awayName={teamName(liveFixture.awayTeamId)}
-            onComplete={handleLiveComplete}
-          />
-        </div>
       )}
 
       {finishedMessage && (
@@ -707,8 +706,8 @@ export default function Tournament({ userRating }: { userRating: number }) {
         />
       )}
 
-      <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <section>
+      <div className="mt-4 grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="min-h-0">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-50">Maç Programı</p>
@@ -717,7 +716,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
             <Activity className="text-yellow-500" size={28} />
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 pb-2">
             {currentFixtures.map((fixture) => {
               const result = fixture.result;
               const score = finalScore(fixture);
@@ -735,7 +734,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
           </div>
         </section>
 
-        <aside className="space-y-6">
+        <aside className="min-h-0 space-y-4">
           {showStandingsPanel && (
             <section className="border-4 border-black bg-zinc-100 p-4 text-black shadow-[6px_6px_0px_0px_#000]">
               <h3 className="border-b-2 border-black pb-3 text-lg font-black uppercase italic">

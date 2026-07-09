@@ -331,3 +331,185 @@ main {
     transition: none !important;
   }
 }
+
+.multiplayer-draft-settings-grid {
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.game-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.game-shell-action-bar {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  min-width: 0;
+}
+
+.game-shell-header,
+.game-shell-mode-nav,
+.game-shell-match-control,
+.game-shell-bottom-action {
+  min-width: 0;
+}
+
+.game-shell-match-control {
+  position: sticky;
+  top: 0;
+  z-index: 34;
+}
+
+.game-shell-floating-action {
+  position: fixed;
+  right: 0.75rem;
+  bottom: calc(4rem + env(safe-area-inset-bottom));
+  left: 0.75rem;
+  z-index: 50;
+  min-width: 0;
+}
+
+.game-shell-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.game-shell-tab {
+  min-width: 0;
+  border: 2px solid #000;
+  background: #fff;
+  padding: 0.7rem 0.35rem;
+  color: #000;
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.game-shell-tab--active {
+  background: #facc15;
+}
+
+.game-shell-grid,
+.game-shell-shared-grid {
+  min-width: 0;
+}
+
+.game-shell-panel {
+  display: none;
+  min-width: 0;
+}
+
+.game-shell-panel--mobile-active {
+  display: block;
+}
+
+@media (min-width: 80rem) {
+  body[data-game-shell] {
+    overflow: hidden;
+  }
+
+  body[data-game-shell] > footer {
+    display: none;
+  }
+
+  .multiplayer-draft-settings-grid--friends {
+    display: none;
+    grid-template-columns: 180px 220px minmax(0, 1fr);
+  }
+
+  .multiplayer-draft-settings-grid--invite {
+    display: none;
+    grid-template-columns: 180px minmax(0, 2fr) minmax(220px, 1fr);
+  }
+
+  .game-shell {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .game-shell-action-bar {
+    position: relative;
+    top: auto;
+    flex: 0 0 auto;
+  }
+
+  .game-shell-header,
+  .game-shell-mode-nav,
+  .game-shell-match-control,
+  .game-shell-bottom-action {
+    flex: 0 0 auto;
+  }
+
+  .game-shell-floating-action {
+    position: absolute;
+    right: 1rem;
+    bottom: 1rem;
+    left: auto;
+    max-width: 32rem;
+  }
+
+  .game-shell-tabs {
+    display: none;
+  }
+
+  .game-shell-grid,
+  .game-shell-shared-grid {
+    display: grid;
+    min-height: 0;
+    flex: 1 1 0%;
+    gap: 0.75rem;
+    overflow: hidden;
+  }
+
+  .game-shell-grid,
+  .game-shell-shared-grid--builder {
+    grid-template-columns: minmax(280px, 310px) minmax(560px, 1fr) minmax(280px, 330px);
+  }
+
+  .game-shell-shared-grid--season {
+    grid-template-columns: minmax(280px, 320px) minmax(520px, 1fr) minmax(300px, 360px);
+  }
+
+  .game-shell-panel {
+    display: block;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .game-shell-panel > * {
+    min-height: 0;
+  }
+
+  .game-shell-panel--left,
+  .game-shell-panel--right {
+    overflow-y: auto;
+  }
+
+  .game-shell-panel--center {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .multiplayer-shell-pitch {
+    aspect-ratio: auto !important;
+    height: clamp(320px, 42vh, 460px) !important;
+    min-height: 320px !important;
+  }
+
+  .quick-shell-pitch {
+    aspect-ratio: auto !important;
+    height: clamp(430px, 62vh, 610px) !important;
+    min-height: 430px !important;
+  }
+}
