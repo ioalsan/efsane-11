@@ -18,6 +18,7 @@ export interface MatchSummary {
   possession: string;
   goalMinutes: string;
   keyMoments: string[];
+  commentary?: string;
 }
 
 const formatMinute = (minute: number) => `${minute}'`;
@@ -37,11 +38,11 @@ export const flowTextForMinute = (minute: number, sideName: string) => {
   if (minute === 120) return 'Maç sonu';
 
   const flowEvent = flowEventForMinute(minute);
-  if (flowEvent === 'pass') return `${sideName} orta saha mücadelesi kuruyor`;
-  if (flowEvent === 'attack') return `${sideName} tehlikeli geliyor`;
-  if (flowEvent === 'shot') return `${sideName} şut arıyor`;
-  if (flowEvent === 'save') return 'Kaleci kurtarışı geldi';
-  if (flowEvent === 'foul') return 'Faul düdüğü ve kısa bir duraklama';
+  if (flowEvent === 'pass') return `${sideName} orta sahada top çeviriyor`;
+  if (flowEvent === 'attack') return `${sideName} baskıyı artırıyor`;
+  if (flowEvent === 'shot') return `${sideName} ceza sahasına yaklaşıyor`;
+  if (flowEvent === 'save') return 'Kaleci gole izin vermedi';
+  if (flowEvent === 'foul') return 'Hakem oyunu kesti';
   return 'Oyun akıyor';
 };
 
@@ -66,7 +67,7 @@ export const describeIncident = (
     return {
       id: `incident-${incident.minute}-${incident.teamId}-${incident.playerName}`,
       minute: formatMinute(incident.minute),
-      text: `GOL! ${teamName} adına ${incident.playerName}.`,
+      text: `GOL! ${teamName} adına ${incident.playerName} ağları havalandırdı.`,
       tone: 'goal',
     };
   }
@@ -82,7 +83,7 @@ export const describeIncident = (
     return {
       id: `incident-${incident.minute}-${incident.teamId}-${incident.playerName}`,
       minute: formatMinute(incident.minute),
-      text: `Oyuncu değişikliği: ${incident.relatedPlayerName ?? 'Oyuncu'} çıktı, ${incident.playerName} girdi.`,
+      text: `Oyuncu değişikliği: ${incident.relatedPlayerName ?? 'Oyuncu'} çıktı, ${incident.playerName} oyunda.`,
       tone: 'change',
     };
   }
@@ -188,12 +189,46 @@ const pickManOfTheMatch = (
   return `${leadingTeam} kolektifi`;
 };
 
+const buildMatchCommentary = (
+  fixture: Pick<CompetitionFixture, 'homeTeamId' | 'awayTeamId'>,
+  result: MatchResult,
+  homeName: string,
+  awayName: string,
+) => {
+  const finalScore = result.extraTime ?? result.normalTime;
+  const goalDifference = Math.abs(finalScore.home - finalScore.away);
+  const leadingTeam = finalScore.home > finalScore.away ? homeName : awayName;
+  const totalShots = result.stats.shotsHome + result.stats.shotsAway;
+  const possessionGap = Math.abs(result.stats.possessionHome - (100 - result.stats.possessionHome));
+  const firstIncident = result.incidents[0];
+
+  if (finalScore.home === finalScore.away) {
+    return 'Dengeli geçen maçta iki taraf da skoru kıramadı.';
+  }
+  if (goalDifference >= 3) {
+    return `${leadingTeam} oyunu baştan sona kontrol etti ve farkı açtı.`;
+  }
+  if (totalShots >= 20 && possessionGap <= 20) {
+    return 'Bol pozisyonlu maçta son vuruşlar sonucu belirledi.';
+  }
+  if (result.stats.possessionHome >= 58 && finalScore.home > finalScore.away) {
+    return `${homeName} topa daha çok sahip oldu ve oyunun ritmini belirledi.`;
+  }
+  if (result.stats.possessionHome <= 42 && finalScore.away > finalScore.home) {
+    return `${awayName} daha az topla ama daha etkili oynadı.`;
+  }
+  if (firstIncident) {
+    return `${teamNameForIncident(firstIncident, fixture, homeName, awayName)} kritik anlarda daha soğukkanlıydı.`;
+  }
+  return `${leadingTeam} kritik anları daha iyi değerlendirdi.`;
+};
+
 export const buildMatchSummary = (
   fixture: Pick<CompetitionFixture, 'homeTeamId' | 'awayTeamId'>,
   result: MatchResult,
   homeName: string,
   awayName: string,
-): MatchSummary => {
+): MatchSummary & { commentary: string } => {
   const finalScore = result.extraTime ?? result.normalTime;
   const totalShots = result.stats.shotsHome + result.stats.shotsAway;
   const totalShotsOnTarget = result.stats.shotsOnTargetHome + result.stats.shotsOnTargetAway;
@@ -211,5 +246,6 @@ export const buildMatchSummary = (
     keyMoments: keyIncidents.map((incident) => (
       describeIncident(incident, fixture, homeName, awayName).text
     )),
+    commentary: buildMatchCommentary(fixture, result, homeName, awayName),
   };
 };
