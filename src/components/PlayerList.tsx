@@ -6,7 +6,6 @@ import { useTeamStore } from '@/store/useTeamStore';
 import { Crown, Dices } from 'lucide-react';
 import { FORMATIONS, PositionConfig } from '@/lib/formations';
 import { getCompetitionSquads } from '@/lib/seasonRepository';
-import AdSlot from './AdSlot';
 
 interface PlayerListProps {
   side?: 'left' | 'right';
@@ -67,7 +66,7 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
 
   if (isTeamFull) {
     return (
-      <div id="player-draft-panel" className={`w-full scroll-mt-24 lg:w-80 xl:w-96 flex flex-col h-full ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
+      <div id="player-draft-panel" className={`box-border flex h-full min-h-0 w-full max-w-full scroll-mt-24 flex-col overflow-x-hidden ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
         <div className="border-b-2 border-black bg-yellow-500 p-6 text-black">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -102,7 +101,7 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
                   key={player.id}
                   type="button"
                   onClick={() => setCaptain(player.id)}
-                  className={`game-button w-full border-2 border-black p-4 text-left transition-all ${
+                  className={`game-button w-full border-2 border-black p-3 text-left transition-all ${
                     isCaptain
                       ? 'game-button-selected bg-yellow-500 text-black'
                       : isDark
@@ -138,7 +137,6 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
             {captain ? captain.name : 'Bir oyuncu sec'}
           </p>
         </div>
-        <AdSlot placement="left-panel" className="hidden shrink-0 lg:block" />
       </div>
     );
   }
@@ -161,8 +159,8 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
   const availablePlayers = draftList.filter(p => !p.isAlreadyOnPitch);
 
   return (
-    <div id="player-draft-panel" className={`w-full scroll-mt-24 lg:w-80 xl:w-96 flex flex-col h-full ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
-      <div className="p-6 border-b-2 border-black bg-black/10 flex justify-between items-center gap-4">
+    <div id="player-draft-panel" className={`box-border flex h-full min-h-0 w-full max-w-full scroll-mt-24 flex-col overflow-x-hidden ${borderClass} border-black transition-colors duration-300 ${isDark ? 'bg-zinc-900/50' : 'bg-white'}`}>
+      <div className="flex items-center justify-between gap-4 border-b-2 border-black bg-black/10 p-4">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.25em] opacity-45">Draft Paneli</p>
           <h2 className="font-black uppercase tracking-widest text-base italic mt-1">Kadro Seçimi</h2>
@@ -170,7 +168,7 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
         <span className="text-sm font-black bg-black text-white px-3 py-1.5">{totalSelected}/11</span>
       </div>
 
-      <div className="px-5 py-4 border-b-2 border-black bg-black/5 flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 border-b-2 border-black bg-black/5 px-4 py-3">
         <div className="flex items-center gap-2">
           <Dices size={16} className="text-yellow-500" />
           <div>
@@ -197,7 +195,7 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
       </div>
 
       {rolledSquad && !rollingName && !isTeamFull && (
-        <div className={`p-5 border-b-2 border-black ${isDark ? 'bg-[#201a08]' : 'bg-yellow-50'}`}>
+        <div className={`border-b-2 border-black p-3 ${isDark ? 'bg-[#201a08]' : 'bg-yellow-50'}`}>
            <div className="flex gap-3 relative pt-3">
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 text-[9px] font-black uppercase bg-black text-yellow-500 px-3 py-0.5 border border-yellow-500/40">
                 {rerollsLeft} re-roll kaldı
@@ -214,7 +212,7 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {rollingName ? (
            <div className="h-full flex flex-col items-center justify-center text-center py-20">
               <Dices size={48} className="mb-4 animate-spin text-yellow-500" />
@@ -223,9 +221,9 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
            </div>
         ) : rolledSquad ? (
           <>
-            <div className="mb-3 p-4 border-2 border-black bg-yellow-500 text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <div className="mb-2 border-2 border-black bg-yellow-500 p-3 text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
                <p className="text-[11px] font-black uppercase tracking-[0.2em] opacity-65">Gelen Kadro</p>
-               <h3 className="text-2xl font-black italic leading-none my-1.5 tracking-tighter">{rolledSquad.teamName}</h3>
+               <h3 className="my-1 text-xl font-black italic leading-none tracking-tighter">{rolledSquad.teamName}</h3>
                <p className="text-sm font-black opacity-80">{rolledSquad.year}</p>
             </div>
             <div className="overflow-hidden border-2 border-black bg-black/20 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
@@ -267,7 +265,6 @@ export default function PlayerList({ side = 'right' }: PlayerListProps) {
           </div>
         )}
       </div>
-      <AdSlot placement="left-panel" className="hidden shrink-0 lg:block" />
     </div>
   );
 }

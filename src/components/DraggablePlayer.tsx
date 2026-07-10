@@ -2,6 +2,8 @@
 
 import { Player } from '@/types';
 import { useTeamStore } from '@/store/useTeamStore';
+import { showGameShellPanel } from './GameShell';
+import { getPlayerDisplayStats } from './PlayerStatBars';
 
 interface DraggablePlayerProps {
   player: Player;
@@ -24,6 +26,7 @@ export default function DraggablePlayer({ player }: DraggablePlayerProps) {
     player.position,
     player.secondary_position,
   ].filter(Boolean).join('/');
+  const compactStats = getPlayerDisplayStats(player).filter((stat) => ['HIZ', 'PAS', 'DEF'].includes(stat.shortLabel));
 
   const handleClick = () => {
     if (isSelectedForClickPlace) {
@@ -31,12 +34,7 @@ export default function DraggablePlayer({ player }: DraggablePlayerProps) {
     } else {
       setActivePlayerToPlace(player);
       if (window.matchMedia('(max-width: 1023px)').matches) {
-        window.setTimeout(() => {
-          document.getElementById('pitch-container')?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-          });
-        }, 80);
+        showGameShellPanel('center');
       }
     }
   };
@@ -50,7 +48,7 @@ export default function DraggablePlayer({ player }: DraggablePlayerProps) {
   return (
     <div
       onClick={handleClick}
-      className={`player-card relative grid min-h-14 grid-cols-[3rem_minmax(0,1fr)_auto_2.4rem] items-start gap-2 border-b border-black/25 px-3 py-2 transition-all cursor-pointer select-none
+      className={`player-card relative grid min-h-14 grid-cols-[2.4rem_minmax(0,1fr)_auto_2.2rem] items-start gap-2 border-b border-black/25 px-2 py-2 transition-all cursor-pointer select-none
         ${isSelectedForClickPlace
           ? 'player-card-selected text-yellow-100 outline outline-2 outline-yellow-500 -outline-offset-2'
           : (isDark ? 'hover:brightness-110' : 'hover:brightness-105')
@@ -62,14 +60,17 @@ export default function DraggablePlayer({ player }: DraggablePlayerProps) {
       <div className="text-sm font-black tabular-nums text-white/65">
         #{player.jersey_number}
       </div>
-      <h3
-        className="min-w-0 whitespace-normal break-words text-sm font-black leading-tight tracking-tight text-white"
-        style={{
-          overflowWrap: 'anywhere',
-        }}
-      >
-        {player.name}
-      </h3>
+      <div className="min-w-0">
+        <h3
+          className="min-w-0 whitespace-normal break-words text-[13px] font-black leading-tight text-white"
+          style={{ overflowWrap: 'anywhere' }}
+        >
+          {player.name}
+        </h3>
+        <p className="mt-1 flex flex-wrap gap-x-2 text-[8px] font-black uppercase text-white/45">
+          {compactStats.map((stat) => <span key={stat.shortLabel}>{stat.shortLabel} {stat.value}</span>)}
+        </p>
+      </div>
       <div className={`text-[10px] font-black uppercase tracking-tight whitespace-nowrap ${positionTone}`}>
         {positionLabel}
       </div>
