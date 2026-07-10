@@ -84,6 +84,7 @@ export default function LiveMatchPanel({
   onAutoContinueChange,
   onSpeedChange,
   onEngineDebug,
+  compact = false,
 }: {
   fixture: CompetitionFixture;
   result: MatchResult;
@@ -99,6 +100,7 @@ export default function LiveMatchPanel({
   onAutoContinueChange?: (value: boolean) => void;
   onSpeedChange?: (value: SimulationSpeed) => void;
   onEngineDebug?: (debug: LiveMatchEngineDebug) => void;
+  compact?: boolean;
 }) {
   const [minute, setMinute] = useState(0);
   const [phase, setPhase] = useState<MatchPhase>('normal');
@@ -494,10 +496,10 @@ export default function LiveMatchPanel({
   const summary = buildMatchSummary(fixture, result, homeName, awayName);
 
   return (
-    <section className="mt-7 min-w-0 overflow-x-hidden border-4 border-black bg-zinc-950 p-3 text-white shadow-[4px_4px_0px_0px_#000] sm:p-5 sm:shadow-[7px_7px_0px_0px_#000]">
-      <div className="flex flex-col gap-5 border-b-2 border-white/15 pb-5 md:flex-row md:items-center md:justify-between">
+    <section className={`${compact ? 'live-match-panel--compact mt-0' : 'mt-7'} min-w-0 overflow-x-hidden border-4 border-black bg-zinc-950 p-3 text-white shadow-[4px_4px_0px_0px_#000] sm:p-5 sm:shadow-[7px_7px_0px_0px_#000]`}>
+      <div className={`flex flex-col border-b-2 border-white/15 md:flex-row md:items-center md:justify-between ${compact ? 'gap-3 pb-3' : 'gap-5 pb-5'}`}>
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-green-400">Canlı Maç</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-green-400">Maç Merkezi</p>
           <p className="mt-1 text-4xl font-black tabular-nums">
             {phase === 'penalties' ? 'PEN' : `${minute}'`}
           </p>
@@ -525,7 +527,7 @@ export default function LiveMatchPanel({
         showPenaltyScore={(phase === 'penalties' || phase === 'finished') && Boolean(result.penalties)}
       />
 
-      <div className="mt-4 grid gap-2 border-2 border-white/10 bg-black/25 p-3 sm:grid-cols-5">
+      <div className={`${compact ? 'mt-3' : 'mt-4'} grid gap-2 border-2 border-white/10 bg-black/25 p-3 sm:grid-cols-5`}>
         <LiveStat label="Şut" home={liveStats.shotsHome} away={liveStats.shotsAway} />
         <LiveStat label="İsabetli Şut" home={liveStats.shotsOnTargetHome} away={liveStats.shotsOnTargetAway} />
         <LiveStat label="Topa Sahip Olma" home={`%${result.stats.possessionHome}`} away={`%${100 - result.stats.possessionHome}`} />
@@ -533,7 +535,7 @@ export default function LiveMatchPanel({
         <LiveStat label="Faul" home={liveStats.foulsHome} away={liveStats.foulsAway} />
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+      <div className={`${compact ? 'mt-3' : 'mt-4'} grid grid-cols-2 gap-2 sm:flex sm:flex-wrap`}>
         {(['normal', 'fast', 'very-fast'] as SimulationSpeed[]).map((option) => (
           <button
             key={option}
@@ -594,7 +596,7 @@ export default function LiveMatchPanel({
         </p>
       )}
 
-      <div className="mt-5 max-h-80 space-y-2 overflow-y-auto border-t border-white/10 pt-4" aria-live="polite">
+      <div className={`${compact ? 'mt-3 max-h-44 pt-3 xl:max-h-52' : 'mt-5 max-h-80 pt-4'} space-y-2 overflow-y-auto border-t border-white/10`} aria-live="polite">
         {[...timeline].reverse().map((entry) => (
           <div key={entry.id} className={`grid grid-cols-[3rem_auto_1fr] items-center gap-3 border-l-4 p-3 text-xs font-black ${toneClasses[entry.tone]}`}>
             <span className="tabular-nums">{entry.minute}</span>
@@ -609,7 +611,7 @@ export default function LiveMatchPanel({
       </div>
 
       {phase === 'finished' && (
-        <section className="mt-5 border-2 border-white/15 bg-black/35 p-3 sm:p-4">
+        <section className={`${compact ? 'mt-3' : 'mt-5'} border-2 border-white/15 bg-black/35 p-3 sm:p-4`}>
           <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-300">Maç Özeti</p>
@@ -620,6 +622,9 @@ export default function LiveMatchPanel({
               <p className="text-3xl font-black tabular-nums text-yellow-300">{summary.scoreLine}</p>
             </div>
           </div>
+          <p className="mt-3 border border-white/10 bg-white/5 px-3 py-3 text-xs font-black uppercase leading-relaxed text-white/80">
+            {summary.commentary}
+          </p>
           <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className="grid gap-2 sm:grid-cols-2">
               <MatchSummaryTile label="Maçın adamı" value={summary.manOfTheMatch} />

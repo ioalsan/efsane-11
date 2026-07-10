@@ -225,6 +225,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
   const [champion, setChampion] = useState(false);
   const [autoContinue, setAutoContinue] = useState(false);
   const [autoAdvanceToken, setAutoAdvanceToken] = useState(0);
+  const [mobileDashboardTab, setMobileDashboardTab] = useState<'match' | 'fixtures' | 'table'>('match');
   const liveMatchRef = useRef<HTMLDivElement | null>(null);
   const finalResultRef = useRef<HTMLElement | null>(null);
   const autoContinueRef = useRef(false);
@@ -444,8 +445,10 @@ export default function Tournament({ userRating }: { userRating: number }) {
     );
     setIsSimulating(true);
     setPendingSimulation({ mode, fixtures: playedFixtures });
-    if (userFixture?.result) setLiveFixture(userFixture);
-    else {
+    if (userFixture?.result) {
+      setMobileDashboardTab('match');
+      setLiveFixture(userFixture);
+    } else {
       if (mode === 'opening') finalizeOpeningRound(playedFixtures);
       else finalizeKnockoutRound(playedFixtures);
       setPendingSimulation(null);
@@ -483,8 +486,6 @@ export default function Tournament({ userRating }: { userRating: number }) {
     if (nextValue && latestResult && hasPlayableStage) scheduleAutoContinue();
   };
 
-  const latestHome = latestFixture ? teamName(latestFixture.homeTeamId) : '';
-  const latestAway = latestFixture ? teamName(latestFixture.awayTeamId) : '';
   const primaryActionLabel = latestResult ? 'Sonraki Maç' : `${currentStageLabel} Oyna`;
   const actionStageLabel = competition.format === 'league' && inOpeningStage
     ? `${Math.min(currentRoundIndex + 1, openingRounds.length)} / ${openingRounds.length}`
@@ -493,6 +494,14 @@ export default function Tournament({ userRating }: { userRating: number }) {
   const activeFixture = currentFixtures.find(
     (fixture) => fixture.homeTeamId === USER_TEAM_ID || fixture.awayTeamId === USER_TEAM_ID,
   ) ?? currentFixtures[0] ?? null;
+  const activeOpponentId = activeFixture
+    ? activeFixture.homeTeamId === USER_TEAM_ID
+      ? activeFixture.awayTeamId
+      : activeFixture.awayTeamId === USER_TEAM_ID
+        ? activeFixture.homeTeamId
+        : activeFixture.awayTeamId
+    : null;
+  const activeOpponent = activeOpponentId ? teamMap.get(activeOpponentId) : null;
   const showMobileActionBar = !liveFixture && Boolean(finishedMessage);
   const showStandingsPanel = competition.format === 'league' || inOpeningStage || standings.some((row) => row.played > 0);
   const visiblePlayedMatches = playedMatches.filter(({ fixture }) => {
@@ -524,51 +533,245 @@ export default function Tournament({ userRating }: { userRating: number }) {
     void navigator.clipboard?.writeText(tournamentOutput);
   };
 
+  const renderSeasonActionPanel = (mode: 'hero' | 'compact' = 'hero') => (
+    <section className={`border-4 border-black bg-green-600 text-white shadow-[5px_5px_0px_0px_#000] ${mode === 'compact' ? 'p-3' : 'p-4'}`}>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
+            Sezon aksiyonu
+          </p>
+          <h3 className={`mt-1 font-black uppercase italic tracking-tighter ${mode === 'compact' ? 'text-xl' : 'text-2xl'}`}>
+            {currentStageLabel}
+          </h3>
+          <div className="mt-3 grid gap-2 text-[10px] font-black uppercase sm:grid-cols-3">
+            <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+              {actionStagePrefix}: {actionStageLabel}
+            </span>
+            <span className="min-w-0 border-2 border-white/25 bg-black/20 px-3 py-2">
+              Aktif maç: {activeFixture ? `${teamName(activeFixture.homeTeamId)} vs ${teamName(activeFixture.awayTeamId)}` : '-'}
+            </span>
+            <span className="border-2 border-white/25 bg-black/20 px-3 py-2">
+              Durum: {liveFixture ? 'Maç oynanıyor' : hasPlayableStage ? 'Maç başlamaya hazır' : finishedMessage ? 'Turnuva tamamlandı' : 'Beklemede'}
+            </span>
+          </div>
+        </div>
+        {hasPlayableStage && (
+          <button
+            type="button"
+            onClick={startCurrentStageSimulation}
+            disabled={!hasPlayableStage}
+            className={`game-button flex w-full items-center justify-center gap-3 border-4 border-black bg-yellow-400 font-black uppercase italic text-black shadow-[5px_5px_0px_0px_#000] disabled:opacity-50 lg:w-auto ${mode === 'compact' ? 'px-4 py-3 text-xs lg:min-w-56' : 'px-6 py-5 text-base lg:min-w-72'}`}
+          >
+            <Play size={mode === 'compact' ? 18 : 24} fill="currentColor" />
+            {primaryActionLabel}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+
+  const renderFixturePanel = () => (
+    <section className={`flex min-h-0 flex-col border-4 border-black p-3 shadow-[5px_5px_0px_0px_#000] ${isDark ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-black'}`}>
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3 border-b-2 border-black pb-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-50">Maç Programı</p>
+          <h3 className="truncate text-xl font-black uppercase italic">{currentStageLabel}</h3>
+        </div>
+        <Activity className="shrink-0 text-yellow-500" size={26} />
+      </div>
+
+      <div className="min-h-0 space-y-2 overflow-y-auto pr-1 xl:max-h-[calc(100vh-22rem)]">
+        {currentFixtures.map((fixture) => {
+          const result = fixture.result;
+          const score = finalScore(fixture);
+          const isUserMatch = fixture.homeTeamId === USER_TEAM_ID || fixture.awayTeamId === USER_TEAM_ID;
+          return (
+            <div key={fixture.id} className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-2 border-black p-3 shadow-[3px_3px_0px_0px_#000] ${isUserMatch ? 'bg-yellow-500 text-black' : isDark ? 'bg-zinc-950' : 'bg-white'}`}>
+              <p className="truncate text-right text-xs font-black uppercase sm:text-sm">{teamName(fixture.homeTeamId)}</p>
+              <p className="min-w-16 text-center text-xl font-black tabular-nums">
+                {result && score ? `${score.home} - ${score.away}` : 'VS'}
+              </p>
+              <p className="truncate text-left text-xs font-black uppercase sm:text-sm">{teamName(fixture.awayTeamId)}</p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const renderStandingsPanel = () => showStandingsPanel ? (
+    <section className="flex min-h-0 flex-col border-4 border-black bg-zinc-100 p-4 text-black shadow-[5px_5px_0px_0px_#000]">
+      <h3 className="shrink-0 border-b-2 border-black pb-3 text-lg font-black uppercase italic">
+        {competition.format === 'world_cup_48' ? `${userGroup?.groupName ?? 'Grup'} Puan Durumu` : 'Puan Durumu'}
+      </h3>
+      <div className="mt-3 min-h-0 overflow-y-auto xl:max-h-[290px]">
+        <div className="grid grid-cols-[2rem_1fr_repeat(5,2.2rem)] gap-1 border-b border-black/20 pb-2 text-center text-[9px] font-black uppercase">
+          <span>#</span><span className="text-left">Takım</span><span>O</span><span>G</span><span>B</span><span>AV</span><span>P</span>
+        </div>
+        {standings.map((row, index) => (
+          <div key={row.teamId} className={`grid grid-cols-[2rem_1fr_repeat(5,2.2rem)] gap-1 border-b border-black/10 py-2 text-center text-[11px] font-black ${row.teamId === USER_TEAM_ID ? 'bg-yellow-400' : ''}`}>
+            <span>{index + 1}</span>
+            <span className="truncate text-left">{teamName(row.teamId)}</span>
+            <span>{row.played}</span><span>{row.wins}</span><span>{row.draws}</span>
+            <span>{row.goalDifference > 0 ? `+${row.goalDifference}` : row.goalDifference}</span>
+            <span>{row.points}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  ) : null;
+
+  const renderMatchEventsPanel = () => !liveFixture && latestResult ? (
+    <section className="border-4 border-black bg-zinc-900 p-4 text-white shadow-[5px_5px_0px_0px_#000]">
+      <h3 className="flex items-center gap-2 border-b border-white/15 pb-3 text-sm font-black uppercase">
+        <AlertTriangle size={18} className="text-yellow-500" /> Maç Olayları
+      </h3>
+      <div className="mt-3 max-h-32 space-y-2 overflow-y-auto pr-1">
+        {latestResult.incidents.filter((incident) => incident.type !== 'goal').length === 0 && (
+          <p className="text-xs font-bold opacity-45">Önemli olay yok.</p>
+        )}
+        {latestResult.incidents.filter((incident) => incident.type !== 'goal').map((incident, index) => (
+          <p key={`${incident.minute}-${incident.playerName}-${index}`} className="text-xs font-black">
+            {incident.minute}&apos; {
+              incident.type === 'yellow-card' ? 'Sarı kart' : 'Küçük sakatlık'
+            }: {incident.playerName}
+          </p>
+        ))}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/15 pt-3 text-center">
+        <Stat label="Topa Sahip Olma" value={`%${latestResult.stats.possessionHome}`} />
+        <Stat label="Şut" value={`${latestResult.stats.shotsHome} / ${latestResult.stats.shotsAway}`} />
+        <Stat label="İsabet" value={`${latestResult.stats.shotsOnTargetHome} / ${latestResult.stats.shotsOnTargetAway}`} />
+        <Stat label="xG" value={`${latestResult.stats.xgHome} / ${latestResult.stats.xgAway}`} />
+      </div>
+    </section>
+  ) : null;
+
+  const mobileTabs = [
+    { id: 'match' as const, label: 'Maç' },
+    { id: 'fixtures' as const, label: 'Fikstür' },
+    { id: 'table' as const, label: 'Puan' },
+  ];
+
   return (
-    <div className={`mx-auto w-full max-w-7xl overflow-visible border-4 border-black p-3 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-4 ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-4' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
+    <div className={`mx-auto flex w-full max-w-[1500px] flex-col overflow-visible border-4 border-black p-3 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:p-4 xl:h-[calc(100vh-1.5rem)] xl:min-h-[720px] xl:overflow-hidden ${showMobileActionBar ? 'pb-44 sm:pb-44 md:pb-4' : ''} ${isDark ? 'bg-zinc-950 text-white' : 'bg-white text-black'}`}>
       <AutoContinueRunner
         token={autoAdvanceToken}
         enabled={autoContinue}
         canRun={hasPlayableStage}
         onRun={startCurrentStageSimulation}
       />
-      <header className="shrink-0 border-b-4 border-black pb-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="grid h-14 w-14 place-items-center border-2 border-black bg-yellow-500 text-black shadow-[4px_4px_0px_0px_#000]">
-            <Trophy size={30} />
+      <header className="shrink-0 border-b-4 border-black pb-3">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)] lg:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid h-12 w-12 shrink-0 place-items-center border-2 border-black bg-yellow-500 text-black shadow-[4px_4px_0px_0px_#000]">
+            <Trophy size={26} />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.24em] opacity-55">{competition.season}</p>
-            <h2 className="text-3xl font-black uppercase italic tracking-tighter">{competition.competitionName}</h2>
+            <h2 className="truncate text-2xl font-black uppercase italic tracking-tighter sm:text-3xl">{competition.competitionName}</h2>
             <p className="mt-1 text-xs font-black uppercase text-yellow-500">{currentStageLabel}</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-3 gap-2 text-center lg:grid-cols-6">
           <Stat label="Takım" value={teams.length} />
           <Stat label="Kadro Gücü" value={managerSummary.power} />
           <Stat label="Kimya" value={`${managerSummary.chemistry}`} />
           <Stat label="Taktik" value={tacticProfile.shortLabel} />
-          <Stat label="Kaptan" value={managerSummary.captainImpact ? `+${managerSummary.captainImpact}` : '-'} />
+          <Stat label="Rakip" value={activeOpponent?.rating ?? '-'} />
           <Stat label="Format" value={formatLabel(competition)} />
         </div>
         </div>
       </header>
 
-      {liveFixture?.result && (
-        <div ref={liveMatchRef} className="mt-4 shrink-0 scroll-mt-4 md:scroll-mt-8">
-          <LiveMatchPanel
-            fixture={liveFixture}
-            result={liveFixture.result}
-            homeName={teamName(liveFixture.homeTeamId)}
-            awayName={teamName(liveFixture.awayTeamId)}
-            onComplete={handleLiveComplete}
-          />
-        </div>
-      )}
+      <section className="mt-3 shrink-0">
+        {renderSeasonActionPanel()}
+      </section>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 md:hidden">
+        {mobileTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setMobileDashboardTab(tab.id)}
+            className={`game-button border-2 border-black px-3 py-3 text-[10px] font-black uppercase shadow-[3px_3px_0px_0px_#000] ${mobileDashboardTab === tab.id ? 'bg-yellow-400 text-black' : isDark ? 'bg-zinc-900 text-white' : 'bg-white text-black'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-3 min-h-0 flex-1 xl:grid xl:grid-cols-[minmax(0,1fr)_390px] xl:gap-4 xl:overflow-hidden">
+        <main className={`${mobileDashboardTab === 'match' ? 'block' : 'hidden'} min-h-0 md:block xl:h-full`}>
+          {liveFixture?.result ? (
+            <div ref={liveMatchRef} className="min-h-0 scroll-mt-4 md:scroll-mt-8 xl:h-full xl:overflow-y-auto xl:pr-1">
+              <LiveMatchPanel
+                fixture={liveFixture}
+                result={liveFixture.result}
+                homeName={teamName(liveFixture.homeTeamId)}
+                awayName={teamName(liveFixture.awayTeamId)}
+                onComplete={handleLiveComplete}
+                compact
+              />
+            </div>
+          ) : (
+            <div className="min-h-0 xl:h-full">
+              {renderFixturePanel()}
+            </div>
+          )}
+        </main>
+
+        <section className={`${mobileDashboardTab === 'fixtures' ? 'block' : 'hidden'} mt-3 min-h-0 md:hidden`}>
+          {renderFixturePanel()}
+        </section>
+
+        <aside className={`${mobileDashboardTab === 'table' ? 'block' : 'hidden'} mt-3 min-h-0 space-y-3 md:block xl:mt-0 xl:h-full xl:overflow-y-auto xl:pr-1`}>
+          <section className={`grid gap-3 border-2 border-black p-3 shadow-[4px_4px_0px_0px_#000] ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+            <ManagerGauge label="Kadro Gücü" value={managerSummary.power} tone="yellow" />
+            <ManagerGauge label={`Takım Kimyası / ${managerSummary.chemistryLabel}`} value={managerSummary.chemistry} tone="green" />
+            <div className="border-2 border-black bg-black p-3 text-white">
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-yellow-400">Maç Planı</p>
+              <p className="mt-1 text-lg font-black uppercase">{tacticProfile.label}</p>
+              <p className="mt-1 text-[10px] font-bold leading-relaxed text-white/60">{tacticProfile.description}</p>
+              <p className="mt-2 text-[9px] font-black uppercase tracking-[0.14em] text-white/45">{tacticProfile.riskLabel}</p>
+            </div>
+            <div className="flex flex-col gap-3 border-2 border-black bg-white p-3 text-black sm:flex-row sm:items-center sm:justify-between xl:flex-col xl:items-stretch">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-yellow-600">Otomatik devam et</p>
+                <p className="mt-1 text-[11px] font-bold opacity-60">
+                  Açıkken maç biter ve kısa süre sonra sonraki maç başlar.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-pressed={autoContinue}
+                onClick={toggleAutoContinue}
+                className={`game-button flex items-center justify-center gap-3 border-2 border-black px-4 py-3 text-xs font-black uppercase shadow-[3px_3px_0px_0px_#000] ${autoContinue ? 'bg-green-500 text-black' : 'bg-white text-black'}`}
+              >
+                <span className={`relative h-5 w-10 border-2 border-black ${autoContinue ? 'bg-black' : 'bg-zinc-300'}`}>
+                  <span className={`absolute top-1/2 h-3 w-3 -translate-y-1/2 bg-yellow-400 transition-transform ${autoContinue ? 'translate-x-5' : 'translate-x-1'}`} />
+                </span>
+                {autoContinue ? 'Açık' : 'Kapalı'}
+              </button>
+            </div>
+          </section>
+
+          {renderStandingsPanel()}
+
+          {visiblePlayedMatches.length > 0 && (
+            <PlayedMatchesPanel
+              entries={visiblePlayedMatches}
+              formatScoreLabel={formatScoreLabel}
+              teamName={teamName}
+            />
+          )}
+
+          {renderMatchEventsPanel()}
+        </aside>
+      </div>
 
       {!liveFixture && hasPlayableStage && (
-        <section className="mt-4 border-4 border-black bg-green-600 p-4 text-white shadow-[5px_5px_0px_0px_#000] md:hidden">
+        <section className="hidden">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
             Sezon aksiyonu
           </p>
@@ -598,7 +801,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </section>
       )}
 
-      <section className={`mt-4 grid shrink-0 gap-3 border-2 border-black p-3 shadow-[4px_4px_0px_0px_#000] lg:grid-cols-[1.1fr_1fr_1fr] ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+      <section className="hidden">
         <ManagerGauge label="Kadro Gücü" value={managerSummary.power} tone="yellow" />
         <ManagerGauge label={`Takım Kimyası / ${managerSummary.chemistryLabel}`} value={managerSummary.chemistry} tone="green" />
         <div className="border-2 border-black bg-black p-3 text-white">
@@ -609,7 +812,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </div>
       </section>
 
-      <section className={`mt-4 flex shrink-0 flex-col gap-3 border-2 border-black p-3 shadow-[4px_4px_0px_0px_#000] sm:flex-row sm:items-center sm:justify-between ${isDark ? 'bg-zinc-900' : 'bg-zinc-100 text-black'}`}>
+      <section className="hidden">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-yellow-500">Otomatik devam et</p>
           <p className="mt-1 text-[11px] font-bold opacity-60">
@@ -630,7 +833,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
       </section>
 
       {!liveFixture && hasPlayableStage && (
-        <section className="mt-4 hidden shrink-0 border-4 border-black bg-green-600 p-4 text-white shadow-[6px_6px_0px_0px_#000] md:block">
+        <section className="hidden">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
@@ -696,17 +899,7 @@ export default function Tournament({ userRating }: { userRating: number }) {
         </section>
       )}
 
-      {!liveFixture && latestResult && latestFixture && (
-        <MatchReportCard
-          fixture={latestFixture}
-          homeName={latestHome}
-          awayName={latestAway}
-          managerSummary={managerSummary}
-          teamName={teamName}
-        />
-      )}
-
-      <div className="mt-4 grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="hidden">
         <section className="min-h-0">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -921,6 +1114,8 @@ function ManagerGauge({
   );
 }
 
+// Kept as a dormant detailed report variant while the tournament dashboard uses the compact match center.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function MatchReportCard({
   fixture,
   homeName,

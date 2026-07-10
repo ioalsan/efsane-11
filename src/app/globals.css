@@ -513,3 +513,13 @@ main {
     min-height: 430px !important;
   }
 }
+
+.live-match-panel--compact svg[aria-label$="animasyonu"] {
+  height: clamp(220px, 34vh, 360px) !important;
+}
+
+@media (max-width: 767px) {
+  .live-match-panel--compact svg[aria-label$="animasyonu"] {
+    height: clamp(240px, 44vh, 380px) !important;
+  }
+}
